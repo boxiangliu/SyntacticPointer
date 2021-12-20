@@ -153,7 +153,7 @@ class BiAffine(nn.Module):
             output = output * mask_key.unsqueeze(1)
         return output
 
-    @overrides
+    # @overrides
     def extra_repr(self):
         s = '{key_dim}, {query_dim}'
         breakpoint()
