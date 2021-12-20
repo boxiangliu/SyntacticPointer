@@ -156,6 +156,7 @@ class BiAffine(nn.Module):
     @overrides
     def extra_repr(self):
         s = '{key_dim}, {query_dim}'
+        breakpoint()
         return s.format(**self.__dict__)
 
 
