@@ -427,7 +427,6 @@ class L2RPtrNet(nn.Module):
         nn.init.constant_(self.type_c.bias, 0.)
 
     def _get_encoder_output(self, input_word, input_char, input_pos, mask=None):
-        breakpoint()
         # [batch, length, word_dim]
         word = self.word_embed(input_word)
 
@@ -493,6 +492,7 @@ class L2RPtrNet(nn.Module):
         raise RuntimeError('Stack Pointer Network does not implement forward')
 
     def _transform_decoder_init_state(self, hn):
+        breakpoint()
         if isinstance(hn, tuple):
             hn, cn = hn
             _, batch, hidden_size = cn.size()
