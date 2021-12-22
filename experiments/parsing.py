@@ -116,7 +116,6 @@ def eval(alg, data, network, pred_writer, gold_writer, punct_set, word_alphabet,
 
 
 def train(args):
-    breakpoint()
     logger = get_logger("Parsing")
 
     

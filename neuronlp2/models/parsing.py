@@ -334,6 +334,7 @@ class L2RPtrNet(nn.Module):
                  pos=True, prior_order='inside_out', grandPar=False, sibling=False, activation='elu', remove_cycles=False):
 
         super(L2RPtrNet, self).__init__()
+        breakpoint()
         self.word_embed = nn.Embedding(num_words, word_dim, _weight=embedd_word, padding_idx=1)
         self.pos_embed = nn.Embedding(num_pos, pos_dim, _weight=embedd_pos, padding_idx=1) if pos else None
         self.char_embed = nn.Embedding(num_chars, char_dim, _weight=embedd_char, padding_idx=1)
