@@ -457,6 +457,7 @@ class L2RPtrNet(nn.Module):
 
     def _get_decoder_output(self, output_enc, heads, heads_stack, siblings, hx, mask=None):
         # get vector for heads [batch, length_decoder, input_dim],
+        breakpoint()
         enc_dim = output_enc.size(2)
         batch, length_dec = heads_stack.size()
         src_encoding = output_enc.gather(dim=1, index=heads_stack.unsqueeze(2).expand(batch, length_dec, enc_dim))
@@ -492,9 +493,9 @@ class L2RPtrNet(nn.Module):
         raise RuntimeError('Stack Pointer Network does not implement forward')
 
     def _transform_decoder_init_state(self, hn):
-        breakpoint()
         if isinstance(hn, tuple):
             hn, cn = hn
+            # hn dimension: [2 * num_layers, batch, hidden_size], 2 because of bidirectional
             _, batch, hidden_size = cn.size()
             # take the last layers
             # [batch, 2 * hidden_size] --> [1, batch, 2 * hidden_size]
