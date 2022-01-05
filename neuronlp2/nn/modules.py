@@ -43,7 +43,7 @@ class BiLinear(nn.Module):
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.weight_left)
         nn.init.xavier_uniform_(self.weight_right)
-        if self.bias:
+        if self.bias is not None:
             nn.init.constant_(self.bias, 0.)
         nn.init.xavier_uniform_(self.U)
 
