@@ -457,9 +457,9 @@ class L2RPtrNet(nn.Module):
 
     def _get_decoder_output(self, output_enc, heads, heads_stack, siblings, hx, mask=None):
         # get vector for heads [batch, length_decoder, input_dim],
-        breakpoint()
         enc_dim = output_enc.size(2)
         batch, length_dec = heads_stack.size()
+        # rearrange the order of tokens
         src_encoding = output_enc.gather(dim=1, index=heads_stack.unsqueeze(2).expand(batch, length_dec, enc_dim))
 
         """
@@ -477,7 +477,7 @@ class L2RPtrNet(nn.Module):
             output_enc_gpar = output_enc.gather(dim=1, index=gpars.expand(batch, length_dec, enc_dim)) #* mask_gpar
             src_encoding = src_encoding + output_enc_gpar
         """
-        
+
         # transform to decoder input
         # [batch, length_decoder, dec_dim]
         src_encoding = self.activation(self.src_dense(src_encoding))
@@ -527,6 +527,7 @@ class L2RPtrNet(nn.Module):
 
     def loss(self, input_word, input_char, input_pos, heads, stacked_heads, children, siblings, stacked_types, mask_e=None, mask_d=None):
         # output from encoder [batch, length_encoder, hidden_size]
+        breakpoint()
         output_enc, hn = self._get_encoder_output(input_word, input_char, input_pos, mask=mask_e)
 
         # output size [batch, length_encoder, arc_space]

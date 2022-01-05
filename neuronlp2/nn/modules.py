@@ -36,14 +36,15 @@ class BiLinear(nn.Module):
         if bias:
             self.bias = Parameter(torch.Tensor(out_features))
         else:
-            self.register_parameter('bias', None)
+            self.register_parameter('bias', None) 
 
         self.reset_parameters()
 
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.weight_left)
         nn.init.xavier_uniform_(self.weight_right)
-        nn.init.constant_(self.bias, 0.)
+        if self.bias:
+            nn.init.constant_(self.bias, 0.)
         nn.init.xavier_uniform_(self.U)
 
     def forward(self, input_left, input_right):
@@ -156,7 +157,6 @@ class BiAffine(nn.Module):
     # @overrides
     def extra_repr(self):
         s = '{key_dim}, {query_dim}'
-        breakpoint()
         return s.format(**self.__dict__)
 
 
