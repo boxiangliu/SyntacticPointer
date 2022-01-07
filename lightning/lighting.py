@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 from neuronlp2.nn import CharCNN
 
 
-class LitAutoEncoder(pl.LightningModule):
+class L2RPtrNet(pl.LightningModule):
 
     def __init__(self, word_dim, char_dim, num_chars, pos_dim, num_pos, rnn_mode, hidden_size,
                  encoder_layers, decoder_layers, num_labels, arc_space, type_space,
@@ -186,16 +186,18 @@ class LitAutoEncoder(pl.LightningModule):
 
         type = self.dropout_out(torch.cat([type_h, type_c], dim=1).transpose(1, 2)).transpose(1, 2)
         type_h = type[:, :max_len_d]
-        type_h = type[:, max_len_d:]
+        type_c = type[:, max_len_d:]
 
         # [batch, length_decoder, length_encoder]
         out_arc = self.biaffine(arc_h, arc_c, mask_query=mask_d, mask_key=mask_e)
 
         # get vector for heads [batch, length_decoder, type_space]
+        # This statement gets the type vector for the head (assuming head is known).
+        # children is a misnomer; children means head. 
         type_c = type_c.gather(dim=1, index=children.unsqueeze(
             2).expand(batch, max_len_d, type_space))
 
-        # compute output for type [batch, length_decocer, num_labels]
+        # compute output for type [batch, length_decoder, num_labels]
         out_type = self.bilinear(type_h, type_c)
 
         # mask invalid position to -inf for log_softmax
@@ -206,30 +208,57 @@ class LitAutoEncoder(pl.LightningModule):
 
         # loss_arc shape [batch, length_decoder]
         loss_arc = self.criterion(out_arc.transpose(1, 2), children)
-        loss_type = self.criterion(out_type.transpose(1,2), stacked_types)
+        loss_type = self.criterion(out_type.transpose(1, 2), stacked_types)
 
         if mask_d is not None:
             loss_arc = loss_arc * mask_d
             loss_type = loss_type * mask_d
 
+        # loss_arc [batch, length_decoder]; loss_type [batch, length_decoder]
         return loss_arc.sum(dim=1), loss_type.sum(dim=1)
-    def forward(self):
-        pass
 
-    def training_step(self):
-        pass
+    def forward(self):
+        raise NotImplementedError()
+
+    def training_step(self, batch, batch_idx):
+        words = batch["WORD"]
+        chars = batch["CHAR"]
+        postags = batch["POS"]
+        heads = batch["HEAD"]
+        masks_enc = batch["MASK_ENC"]
+        masks_dec = batch["MASK_DEC"]
+        stacked_heads = batch["STACK_HEAD"]
+        children = batch["CHILD"]
+        siblings = batch["SIBLING"]
+        stacked_types = batch["STACK_TYPE"]
+        nbatch = words.size(0)
+        nwords = masks_enc.sum() - nbatch
+
+        loss_arc, loss_type = self.loss(words, chars, postags, heads, stacked_heads,
+                                        children, siblings, stacked_types, mask_e=masks_enc, mask_d=masks_dec)
+        loss_arc = loss_arc.sum() # sum over batch
+        loss_type = loss_type.sum()
+        loss_total = loss_arc + loss_type
+
+        if self.loss_ty_token:
+            loss = loss_total.div(nwords)
+        else:
+            loss = loss_total.div(nbatch)
+
+        return loss
 
     def validation_step(self):
-        pass
+        raise NotImplementedError()
 
     def test_step(self):
-        pass
+        raise NotImplementedError()
 
     def predict_step(self):
-        pass
+        raise NotImplementedError()
+        # TODO: transfer the parsing::L2RPtrNet.decode() to forward()
 
     def configure_optimizers(self):
-        pass
+        return Adam(self.parameters(), lr=1e-3, betas=(0.9, 0.9), eps=1e-8)
 
     def train_dataloader(self):
         pass

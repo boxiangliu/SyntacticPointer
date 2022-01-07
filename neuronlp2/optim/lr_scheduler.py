@@ -1,4 +1,4 @@
-__author__ = 'max'
+    __author__ = 'max'
 
 from collections import defaultdict
 from torch.optim.optimizer import Optimizer
@@ -11,7 +11,7 @@ class _LRScheduler(object):
                 type(optimizer).__name__))
         self.optimizer = optimizer
         if last_epoch == -1:
-            for group in optimizer.param_groups:
+            for group in optimizer.param_groups: # param_groups is a list of dictionaries
                 group.setdefault('initial_lr', group['lr'])
             last_epoch = 0
         else:
