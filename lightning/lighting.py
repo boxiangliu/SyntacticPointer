@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from neuronlp2.nn import CharCNN
-
+from torch.optim import Adam
 
 class L2RPtrNet(pl.LightningModule):
 
