@@ -1,6 +1,6 @@
 from torch import nn
 import torch
-from lightning.modules import CharCNN
+from lightning.nn.modules import CharCNN
 from enum import Enum
 
 class PriorOrder(Enum):
