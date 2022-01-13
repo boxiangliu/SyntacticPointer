@@ -1,222 +1,213 @@
+from logging import Logger
 import os
-from torch import nn
+import json
+
 import torch
+from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-import pytorch_lightning as pl
-from neuronlp2.nn import CharCNN
 from torch.optim import Adam
 
-class L2RPtrNet(pl.LightningModule):
+import pytorch_lightning as pl
+from lightning.nn import CharCNN
+from lightning.models import L2RPtrNet
+from lightning import utils
+from lightning.io import get_logger
+from lightning.io import conllx_data
 
-    def __init__(self, word_dim, char_dim, num_chars, pos_dim, num_pos, rnn_mode, hidden_size,
-                 encoder_layers, decoder_layers, num_labels, arc_space, type_space,
-                 embedd_word=None, embedd_char=None, embedd_pos=None, p_in=0.33, p_out=0.33, p_rnn=(0.33, 0.33),
-                 pos=True, prior_order="inside_out", grandPar=False, sibling=False, activation="elu", remove_cycles=False):
+
+class Parsing(pl.LightningModule):
+    def __init__(
+        self,
+        config,
+        model_path,
+        word_path,
+        char_path=None,
+        word_embedding="sskip",
+        char_embedding="random",
+        punctuation=[".", "``", "''", ":", ","],
+        optim="Adam",
+        learning_rate=1e-3,
+        lr_decay=0.999997,
+        beta1=0.9,
+        beta2=0.9,
+        eps=1e-4,
+        weight_decay=0.0,
+        seed=1234,
+        loss_type="token",
+        unk_replace=0.5,
+        freeze=None,
+    ):
         super().__init__()
-        self.word_embed = nn.Embedding(num_words, word_dim, _weight=embedd_word, padding_idx=1)
-        self.pos_embed = nn.Embedding(
-            num_pos, pos_dim, _weight=embedd_pos, padding_idx=1) if pos else None
-        self.char_embed = nn.Embedding(num_chars, char_dim, _weight=embedd_char, padding_idx=1)
-        self.char_cnn = CharCNN(2, char_dim, char_dim,
-                                hidden_channels=char_dim * 4, activation=activation)
+        pl.seed_everything(seed)
 
-        self.dropout_in = nn.Dropout2d(p=p_in)
-        self.dropout_out = nn.Dropout2d(p=p_out)
-        self.num_labels = num_labels
+        logger = get_logger("Parsing")
 
-        if prior_order in ["deep_first", "shallow_first"]:
-            self.prior_order = PriorOrder.DEPTH
-        elif prior_order == "inside_out":
-            self.prior_order = PriorOrder.INSIDE_OUT
-        elif prior_order == "left2right":
-            self.prior_order = PriorOrder.LEFT2RIGTH
+        self.seed = seed
+        self.optim = optim
+        self.learning_rate = learning_rate
+        self.lr_decay = lr_decay
+        self.beta1 = beta1
+        self.beta2 = beta2
+        self.eps = eps
+        self.weight_decay = weight_decay
+        self.loss_ty_token = loss_type == "token"
+        self.unk_replace = unk_replace
+        self.freeze = freeze
+        self.punctuation = punctuation
+
+        self.word_embedding = word_embedding
+        self.word_path = word_path
+        self.char_embedding = char_embedding
+        self.char_path = char_path
+
+        word_dict, word_dim = utils.load_embedding_dict(
+            self.word_embedding, self.word_path
+        )
+        if char_embedding != "random":
+            char_dict, char_dim = utils.load_embedding_dict(
+                self.char_embedding, self.char_path
+            )
         else:
-            raise ValueError("Unknown prior order: {}".format(prior_order))
+            char_dict = None
+            char_dim = None
 
-        self.grandPar = grandPar
-        self.sibling = sibling
-        self.remove_cycles = remove_cycles
+        logger.info("Creating alphabets")
+        alphabet_path = os.path.join(model_path, "alphabets")
+        (
+            word_alphabet,
+            char_alphabet,
+            pos_alphabet,
+            type_alphabet,
+        ) = conllx_data.create_alphabets(
+            alphabet_path,
+            train_path,
+            data_paths=[dev_path, test_path],
+            embedd_dict=word_dict,
+            max_vocabulary_size=200000,
+        )
 
-        if rnn_mode == "RNN":
-            RNN_ENCODER = VarRNN
-            RNN_DECODER = VarRNN
-        elif rnn_mode == "LSTM":
-            RNN_ENCODER = VarLSTM
-            RNN_DECODER = VarLSTM
-        elif rnn_mode == "FastLSTM":
-            RNN_ENCODER = VarFastLSTM
-            RNN_DECODER = VarFastLSTM
-        elif rnn_mode == "GRU":
-            RNN_ENCODER = VarGRU
-            RNN_DECODER = VarGRU
-        else:
-            raise ValueError("Unknown RNN mode: {}".format(rnn_mode))
+        num_words = word_alphabet.size()
+        num_chars = char_alphabet.size()
+        num_pos = pos_alphabet.size()
+        num_types = type_alphabet.size()
 
-        dim_enc = word_dim + char_dim
-        if pos:
-            dim_enc += pos_dim
+        logger.info("Word Alphabet Size: %d" % num_words)
+        logger.info("Character Alphabet Size: %d" % num_chars)
+        logger.info("POS Alphabet Size: %d" % num_pos)
+        logger.info("Type Alphabet Size: %d" % num_types)
 
-        self.encoder_layers = encoder_layers
-        self.encoder = RNN_ENCODER(dim_enc, hidden_size, num_layers=encoder_layers,
-                                   batch_first=True, bidirectional=True, dropout=p_rnn)
+        result_path = os.path.join(model_path, 'tmp')
+        if not os.path.exists(result_path):
+            os.makedirs(result_path)
 
-        dim_dec = hidden_size // 2
-        self.src_dense = nn.Linear(2 * hidden_size, dim_dec)
-        self.decoder_layers = decoder_layers
-        self.decoder = RNN_DECODER(dim_dec, hidden_size, num_layers=decoder_layers,
-                                   batch_first=True, bidirectional=False, dropout=p_rnn)
+        punct_set = None
+        if punctuation is not None:
+            punct_set = set(punctuation)
+            logger.info("punctuations(%d): %s" % (len(punct_set), ' '.join(punct_set)))
 
-        self.hx_dense = nn.Linear(2 * hidden_size, hidden_size)
+        def construct_word_embedding_table():
+            scale = np.sqrt(3.0 / word_dim)
+            table = np.empty([word_alphabet.size(), word_dim], dtype=np.float32)
+            table[conllx_data.UNK_ID, :] = np.zeros([1, word_dim]).astype(np.float32) if freeze else np.random.uniform(-scale, scale, [1, word_dim]).astype(np.float32)
+            oov = 0
+            for word, index in word_alphabet.items():
+                if word in word_dict:
+                    embedding = word_dict[word]
+                elif word.lower() in word_dict:
+                    embedding = word_dict[word.lower()]
+                else:
+                    embedding = np.zeros([1, word_dim]).astype(np.float32) if freeze else np.random.uniform(-scale, scale, [1, word_dim]).astype(np.float32)
+                    oov += 1
+                table[index, :] = embedding
+            print('word OOV: %d' % oov)
+            return torch.from_numpy(table)
 
-        self.arc_h = nn.Linear(hidden_size, arc_space)  # arc dense for decoder
-        self.arc_c = nn.Linear(hidden_size * 2, arc_space)  # arc dense for encoder
-        self.biaffine = BiAffine(arc_space, arc_space)
 
-        self.type_h = nn.Linear(hidden_size, type_space)  # type dense for decoder
-        self.type_c = nn.Linear(hidden_size * 2, type_space)  # type dense for encoder
-        self.bilinear = BiLinear(type_space, type_space, self.num_labels)
+        def construct_char_embedding_table():
+            if char_dict is None:
+                return None
 
-        assert activation in ["elu", "tanh"]
-        if activation == "elu":
-            self.activation = nn.ELU(inplace=True)
-        else:
-            self.activation = nn.Tanh()
+            scale = np.sqrt(3.0 / char_dim)
+            table = np.empty([num_chars, char_dim], dtype=np.float32)
+            table[conllx_data.UNK_ID, :] = np.random.uniform(-scale, scale, [1, char_dim]).astype(np.float32)
+            oov = 0
+            for char, index, in char_alphabet.items():
+                if char in char_dict:
+                    embedding = char_dict[char]
+                else:
+                    embedding = np.random.uniform(-scale, scale, [1, char_dim]).astype(np.float32)
+                    oov += 1
+                table[index, :] = embedding
+            print('character OOV: %d' % oov)
+            return torch.from_numpy(table)
 
-        self.criterion = nn.CrossEntropyLoss(reduction="none")
-        self.reset_parameters(embedd_word, embedd_char, embedd_pos)
+        word_table = construct_word_embedding_table()
+        char_table = construct_char_embedding_table()
+        logger.info("constructing network...")
 
-    def reset_parameters(self, embedd_word, embedd_char, embedd_pos):
-        raise NotImplementedError()
+        hyps = json.load(open(config, "r"))
+        json.dump(hyps, open(os.path.join(model_path, "config.json"), "w"), indent=2)
 
-    def _get_encoder_output(self, input_word, input_char, input_pos, mask=None):
-        # [batch, length, word_dim]
-        word = self.word_embed(input_word)
+        model_type = hyps["model"]
+        assert model_type == "L2RPtr"
+        word_dim = hyps["word_dim"]
+        char_dim = hyps["char_dim"]
+        use_pos = hyps["pos"]
+        pos_dim = hyps["pos_dim"]
+        mode = hyps["rnn_mode"]
+        hidden_size = hyps["hidden_size"]
+        arc_space = hyps["arc_space"]
+        type_space = hyps["type_space"]
+        p_in = hyps["p_in"]
+        p_out = hyps["p_out"]
+        p_rnn = hyps["p_rnn"]
+        activation = hyps["activation"]
+        prior_order = None
 
-        # [batch, length, char_length, char_dim]
-        char = self.char_cnn(self.char_embed(input_char))
+        if self.model_type == "L2RPtr":
+            encoder_layers = hyps["encoder_layers"]
+            decoder_layers = hyps["decoder_layers"]
+            num_layers = (encoder_layers, decoder_layers)
+            prior_order = hyps["prior_order"]
+            grandPar = hyps["grandPar"]
+            sibling = hyps["sibling"]
+            network = L2RPtrNet(
+                word_dim,
+                num_words,
+                char_dim,
+                num_chars,
+                pos_dim,
+                num_pos,
+                mode,
+                hidden_size,
+                encoder_layers,
+                decoder_layers,
+                num_types,
+                arc_space,
+                type_space,
+                embedd_word=word_table,
+                embedd_char=char_table,
+                prior_order=prior_order,
+                activation=activation,
+                p_in=p_in,
+                p_out=p_out,
+                p_rnn=p_rnn,
+                pos=use_pos,
+                grandPar=grandPar,
+                sibling=sibling,
+            )
 
-        # apply dropout word on input
-        word = self.dropout_in(word)
-        char = self.dropout_in(char)
 
-        # concatenate word and char, [batch, length, word_dim + char_filter]
-        enc = torch.cat([word, char], dim=2)
+        model = "{}-{}".format(model_type, mode)
+        logger.info("Network: %s, num_layer=%s, hidden=%d, act=%s" % (model, num_layers, hidden_size, activation))
+        logger.info("dropout(in, out, rnn): %s(%.2f, %.2f, %s)" % ('variational', p_in, p_out, p_rnn))
+        logger.info('# of Parameters: %d' % (sum([param.numel() for param in network.parameters()])))
 
-        if self.pos_embed is not None:
-            # [batch, length, pos_dim]
-            pos = self.pos_embed(input_pos)
-            # apply dropout on input
-            pos = self.dropout_in(pos)
-            enc = torch.cat([enc, pos], dim=2)
+        logger.info("Reading Data")
+        # START HERE: implement read_data and read_bucketed data
 
-        # output from rnn [batch, length, hidden_size]
-        output, hn = self.encoder(enc, mask)
-
-        # apply dropout
-        # [batch, length, hidden_size] -> [batch, hidden_size, length] -> [batch, length, hidden_size]
-        output = self.dropout_out(output.transpose(1, 2)).transpose(1, 2)
-
-        return output, hn
-
-    def _get_decoder_output(self, output_enc, heads, heads_stack, siblings, hx, mask=None):
-        # get vector for heads [batch, length_decoder, input_dim]
-        enc_dim = output_enc.size(2)
-        batch, length_dec = heads_stack.size()
-        # rearrange the order of input tokens according to heads_stack:
-        src_encoding = output_enc.gather(
-            dim=1, index=heads_stack.unsqueeze(2).expand(batch, length_dec, enc_dim))
-
-        # transform to decoder input
-        # [batch, length_decoder, dec_dim]
-        src_encoding = self.activation(self.src_dense(src_encoding))
-        # output from rnn [batch, length, hidden_size]
-        output, hn = self.decoder(src, src_encoding, mask, hx=hx)
-        # apply dropout
-        # [batch, length, hidden_size] -> [batch, hidden_size, length] -> [batch, length, hidden_size]
-        output = self.dropout_out(output.transpose(1, 2)).transpose(1, 2)
-
-        return output, hn
-
-    def _transform_decoder_init_state(self):
-        hn, cn = hn
-        # hn dimension: [2 * num_layers, batch, hidden_size], 2 because of bidirectional
-        _, batch, hidden_size = cn.size()
-        # take the last layers (one in each direction)
-        cn = torch.cat([cn[-1], cn[-2]], dim=1).unsqueeze(0)
-        # take hx_dense to [1, batch, hidden_size]
-        cn = self.hx_dense(cn)
-        # [decoder_layers, batch, hidden_size]
-        if self.decoder_layers > 1:
-            cn = torch.cat([cn, cn.new_zeros(self.decoder_layers - 1, batch, hidden_size)], dim=0)
-        # hn is tanh(cn)
-        hn = torch.tanh(cn)
-        hn = (hn, cn)
-        return hn
-
-    def loss(self, input_word, input_char, input_pos, heads, stacked_heads, children, siblings, stacked_types, mask_e=None, mask_d=None):
-        # output from encoder [batch, length_encoder, hidden_size]
-        output_enc, hn = self._get_encoder_output(input_word, input_char, input_pos, mask=mask_e)
-
-        # output size [batch, length_encoder, arc_space]
-        arc_c = self.activation(seelf.arc_c(output_enc))
-        # output size [batch, length_encoder, type_space]
-        type_c = self.activation(self.type_c(output_enc))
-
-        # transform hn to [decoder_layers, batch, hidden_size]
-        hn = self._transform_decoder_init_state(hn)
-
-        # output from decoder [batch, length_decoder, tag_space]
-        output_dec, _ = self._get_decoder_output(
-            output_enc, heads, stacked_heads, siblings, hn, mask=mask_d)
-
-        # output size [batch, length_decoder, arc_space]
-        arc_h = self.activation(self.arc_h(output_dec))
-
-        # output size [batch, length_decoder, type_space]
-        type_h = self.activation(self.type_h(output_dec))
-
-        batch, max_len_d, type_space = type_h.size()
-
-        # apply dropout
-        # [batch, length_decoder, hidden] + [batch, length_encoder, hidden] -> [batch, length_decoder + length_encoder, hidden]
-        arc = self.dropout_out(torch.cat([arc_h, arc_c], dim=1).transpose(1, 2)).transpose(1, 2)
-        arc_h = arc[:, :max_len_d]
-        arc_c = arc[:, max_len_d:]
-
-        type = self.dropout_out(torch.cat([type_h, type_c], dim=1).transpose(1, 2)).transpose(1, 2)
-        type_h = type[:, :max_len_d]
-        type_c = type[:, max_len_d:]
-
-        # [batch, length_decoder, length_encoder]
-        out_arc = self.biaffine(arc_h, arc_c, mask_query=mask_d, mask_key=mask_e)
-
-        # get vector for heads [batch, length_decoder, type_space]
-        # This statement gets the type vector for the head (assuming head is known).
-        # children is a misnomer; children means head. 
-        type_c = type_c.gather(dim=1, index=children.unsqueeze(
-            2).expand(batch, max_len_d, type_space))
-
-        # compute output for type [batch, length_decoder, num_labels]
-        out_type = self.bilinear(type_h, type_c)
-
-        # mask invalid position to -inf for log_softmax
-        if mask_e is not None:
-            minus_mask_e = mask_e.eq(0).unsqueeze(1)
-            minus_mask_d = mask_d.eq(0).unsqueeze(2)
-            out_arc = out_arc.masked_fill(minus_mask_d * minus_mask_e, float("-inf"))
-
-        # loss_arc shape [batch, length_decoder]
-        loss_arc = self.criterion(out_arc.transpose(1, 2), children)
-        loss_type = self.criterion(out_type.transpose(1, 2), stacked_types)
-
-        if mask_d is not None:
-            loss_arc = loss_arc * mask_d
-            loss_type = loss_type * mask_d
-
-        # loss_arc [batch, length_decoder]; loss_type [batch, length_decoder]
-        return loss_arc.sum(dim=1), loss_type.sum(dim=1)
-
+        
     def forward(self):
         raise NotImplementedError()
 
@@ -234,9 +225,19 @@ class L2RPtrNet(pl.LightningModule):
         nbatch = words.size(0)
         nwords = masks_enc.sum() - nbatch
 
-        loss_arc, loss_type = self.loss(words, chars, postags, heads, stacked_heads,
-                                        children, siblings, stacked_types, mask_e=masks_enc, mask_d=masks_dec)
-        loss_arc = loss_arc.sum() # sum over batch
+        loss_arc, loss_type = self.loss(
+            words,
+            chars,
+            postags,
+            heads,
+            stacked_heads,
+            children,
+            siblings,
+            stacked_types,
+            mask_e=masks_enc,
+            mask_d=masks_dec,
+        )
+        loss_arc = loss_arc.sum()  # sum over batch
         loss_type = loss_type.sum()
         loss_total = loss_arc + loss_type
 
@@ -258,7 +259,15 @@ class L2RPtrNet(pl.LightningModule):
         # TODO: transfer the parsing::L2RPtrNet.decode() to forward()
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=1e-3, betas=(0.9, 0.9), eps=1e-8)
+        if self.optim == "Adam":
+            return Adam(
+                self.model.parameters(),
+                lr=self.learning_rate,
+                betas=(self.beta1, self.beta2),
+                eps=self.eps,
+            )
+        else:
+            raise NotImplementedError
 
     def train_dataloader(self):
         pass

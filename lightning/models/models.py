@@ -1,12 +1,15 @@
 from torch import nn
 import torch
-from lightning.nn.modules import CharCNN
+from lightning.nn import CharCNN, BiAffine, BiLinear
 from enum import Enum
+from neuronlp2.nn import VarFastLSTM
+
 
 class PriorOrder(Enum):
     DEPTH = 0
     INSIDE_OUT = 1
     LEFT2RIGTH = 2
+
 
 class L2RPtrNet(nn.Module):
     def __init__(
@@ -70,18 +73,9 @@ class L2RPtrNet(nn.Module):
         self.sibling = sibling
         self.remove_cycles = remove_cycles
 
-        if rnn_mode == "RNN":
-            RNN_ENCODER = VarRNN
-            RNN_DECODER = VarRNN
-        elif rnn_mode == "LSTM":
-            RNN_ENCODER = VarLSTM
-            RNN_DECODER = VarLSTM
-        elif rnn_mode == "FastLSTM":
+        if rnn_mode == "FastLSTM":
             RNN_ENCODER = VarFastLSTM
             RNN_DECODER = VarFastLSTM
-        elif rnn_mode == "GRU":
-            RNN_ENCODER = VarGRU
-            RNN_DECODER = VarGRU
         else:
             raise ValueError("Unknown RNN mode: {}".format(rnn_mode))
 
@@ -131,7 +125,28 @@ class L2RPtrNet(nn.Module):
         self.reset_parameters(embedd_word, embedd_char, embedd_pos)
 
     def reset_parameters(self, embedd_word, embedd_char, embedd_pos):
-        raise NotImplementedError()
+        if embedd_word is None:
+            nn.init.uniform_(self.word_embed.weight, -0.1, 0.1)
+        if embedd_char is None:
+            nn.init.uniform_(self.char_embed.weight, -0.1, 0.1)
+        if embedd_pos is None and self.pos_embed is not None:
+            nn.init.uniform_(self.pos_embed.weight, -0.1, 0.1)
+
+        with torch.no_grad():
+            self.word_embed.weight[self.word_embed.padding_idx].fill_(0)
+            self.char_embed.weight[self.char_embed.padding_idx].fill_(0)
+            if self.pos_embed is not None:
+                self.pos_embed.weight[self.pos_embed.padding_idx].fill_(0)
+
+        nn.init.xavier_uniform_(self.arc_h.weight)
+        nn.init.constant_(self.arc_h.bias, 0.0)
+        nn.init.xavier_uniform_(self.arc_c.weight)
+        nn.init.constant_(self.arc_c.bias, 0.0)
+
+        nn.init.xavier_uniform_(self.type_h.weight)
+        nn.init.constant_(self.type_h.bias, 0.0)
+        nn.init.xavier_uniform_(self.type_c.weight)
+        nn.init.constant_(self.type_c.bias, 0.0)
 
     def _get_encoder_output(self, input_word, input_char, input_pos, mask=None):
         # [batch, length, word_dim]
@@ -222,7 +237,7 @@ class L2RPtrNet(nn.Module):
         )
 
         # output size [batch, length_encoder, arc_space]
-        arc_c = self.activation(seelf.arc_c(output_enc))
+        arc_c = self.activation(self.arc_c(output_enc))
         # output size [batch, length_encoder, type_space]
         type_c = self.activation(self.type_c(output_enc))
 
@@ -285,3 +300,6 @@ class L2RPtrNet(nn.Module):
 
         # loss_arc [batch, length_decoder]; loss_type [batch, length_decoder]
         return loss_arc.sum(dim=1), loss_type.sum(dim=1)
+
+    def decode(self):
+        raise NotImplementedError

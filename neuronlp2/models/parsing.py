@@ -527,7 +527,6 @@ class L2RPtrNet(nn.Module):
 
     def loss(self, input_word, input_char, input_pos, heads, stacked_heads, children, siblings, stacked_types, mask_e=None, mask_d=None):
         # output from encoder [batch, length_encoder, hidden_size]
-        breakpoint()
         output_enc, hn = self._get_encoder_output(input_word, input_char, input_pos, mask=mask_e)
 
         # output size [batch, length_encoder, arc_space]
