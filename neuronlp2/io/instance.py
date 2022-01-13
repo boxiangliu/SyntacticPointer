@@ -1,6 +1,6 @@
-__author__ = 'max'
+__author__ = "max"
 
-__all__ = ['Sentence', 'DependencyInstance', 'NERInstance']
+__all__ = ["Sentence", "DependencyInstance", "NERInstance"]
 
 
 class Sentence(object):
@@ -28,7 +28,9 @@ class DependencyInstance(object):
 
 
 class NERInstance(object):
-    def __init__(self, sentence, postags, pos_ids, chunk_tags, chunk_ids, ner_tags, ner_ids):
+    def __init__(
+        self, sentence, postags, pos_ids, chunk_tags, chunk_ids, ner_tags, ner_ids
+    ):
         self.sentence = sentence
         self.postags = postags
         self.pos_ids = pos_ids

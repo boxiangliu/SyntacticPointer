@@ -1,11 +1,15 @@
-_author__ = 'max'
+_author__ = "max"
 
 import logging
 import sys
 
 
-def get_logger(name, level=logging.INFO, handler=sys.stdout,
-               formatter='%(asctime)s - %(name)s - %(levelname)s - %(message)s'):
+def get_logger(
+    name,
+    level=logging.INFO,
+    handler=sys.stdout,
+    formatter="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+):
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter(formatter)

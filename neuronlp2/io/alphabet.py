@@ -1,4 +1,4 @@
-__author__ = 'max'
+__author__ = "max"
 
 """
 Alphabet maps objects to integer ids. It provides two way mapping from the index to the objects.
@@ -6,6 +6,7 @@ Alphabet maps objects to integer ids. It provides two way mapping from the index
 import json
 import os
 from neuronlp2.io.logger import get_logger
+
 
 class Alphabet(object):
     def __init__(self, name, default_value=False, keep_growing=True, singleton=False):
@@ -23,7 +24,7 @@ class Alphabet(object):
 
         self.next_index = self.offset
 
-        self.logger = get_logger('Alphabet')
+        self.logger = get_logger("Alphabet")
 
     def add(self, instance):
         if instance not in self.instance2index:
@@ -33,19 +34,19 @@ class Alphabet(object):
 
     def add_singleton(self, id):
         if self.singletons is None:
-            raise RuntimeError('Alphabet %s does not have singleton.' % self.__name)
+            raise RuntimeError("Alphabet %s does not have singleton." % self.__name)
         else:
             self.singletons.add(id)
 
     def add_singletons(self, ids):
         if self.singletons is None:
-            raise RuntimeError('Alphabet %s does not have singleton.' % self.__name)
+            raise RuntimeError("Alphabet %s does not have singleton." % self.__name)
         else:
             self.singletons.update(ids)
 
     def is_singleton(self, id):
         if self.singletons is None:
-            raise RuntimeError('Alphabet %s does not have singleton.' % self.__name)
+            raise RuntimeError("Alphabet %s does not have singleton." % self.__name)
         else:
             return id in self.singletons
 
@@ -66,12 +67,12 @@ class Alphabet(object):
     def get_instance(self, index):
         if self.default_value and index == self.default_index:
             # First index is occupied by the wildcard element.
-            return '<_UNK>'
+            return "<_UNK>"
         else:
             try:
                 return self.instances[index - self.offset]
             except IndexError:
-                raise IndexError('unknown index: %d' % index)
+                raise IndexError("unknown index: %d" % index)
 
     def size(self):
         return len(self.instances) + self.offset
@@ -84,8 +85,13 @@ class Alphabet(object):
 
     def enumerate_items(self, start):
         if start < self.offset or start >= self.size():
-            raise IndexError("Enumerate is allowed between [%d : size of the alphabet)" % self.offset)
-        return zip(range(start, len(self.instances) + self.offset), self.instances[start - self.offset:])
+            raise IndexError(
+                "Enumerate is allowed between [%d : size of the alphabet)" % self.offset
+            )
+        return zip(
+            range(start, len(self.instances) + self.offset),
+            self.instances[start - self.offset :],
+        )
 
     def close(self):
         self.keep_growing = False
@@ -95,16 +101,19 @@ class Alphabet(object):
 
     def get_content(self):
         if self.singletons is None:
-            return {'instance2index': self.instance2index, 'instances': self.instances}
+            return {"instance2index": self.instance2index, "instances": self.instances}
         else:
-            return {'instance2index': self.instance2index, 'instances': self.instances,
-                    'singletions': list(self.singletons)}
+            return {
+                "instance2index": self.instance2index,
+                "instances": self.instances,
+                "singletions": list(self.singletons),
+            }
 
     def __from_json(self, data):
         self.instances = data["instances"]
         self.instance2index = data["instance2index"]
-        if 'singletions' in data:
-            self.singletons = set(data['singletions'])
+        if "singletions" in data:
+            self.singletons = set(data["singletions"])
         else:
             self.singletons = None
 
@@ -120,8 +129,11 @@ class Alphabet(object):
             if not os.path.exists(output_directory):
                 os.makedirs(output_directory)
 
-            json.dump(self.get_content(),
-                      open(os.path.join(output_directory, saving_name + ".json"), 'w'), indent=4)
+            json.dump(
+                self.get_content(),
+                open(os.path.join(output_directory, saving_name + ".json"), "w"),
+                indent=4,
+            )
         except Exception as e:
             self.logger.warn("Alphabet is not saved: %s" % repr(e))
 
@@ -133,6 +145,8 @@ class Alphabet(object):
         :return:
         """
         loading_name = name if name else self.__name
-        self.__from_json(json.load(open(os.path.join(input_directory, loading_name + ".json"))))
+        self.__from_json(
+            json.load(open(os.path.join(input_directory, loading_name + ".json")))
+        )
         self.next_index = len(self.instances) + self.offset
         self.keep_growing = False

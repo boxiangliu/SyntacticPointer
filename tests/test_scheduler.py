@@ -1,5 +1,4 @@
 from torch import optim
-from torch._C import _last_executed_optimized_graph
 from lightning.optim import ExponentialScheduler
 from torch import nn
 from torch.optim import SGD
