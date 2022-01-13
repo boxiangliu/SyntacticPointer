@@ -1,4 +1,4 @@
-__author__ = 'max'
+__author__ = "max"
 
 import os.path
 import numpy as np
@@ -9,8 +9,25 @@ from neuronlp2.io.reader import CoNLLXReader
 from neuronlp2.io.alphabet import Alphabet
 from neuronlp2.io.logger import get_logger
 from neuronlp2.io.common import DIGIT_RE, MAX_CHAR_LENGTH, UNK_ID
-from neuronlp2.io.common import PAD_CHAR, PAD, PAD_POS, PAD_TYPE, PAD_ID_CHAR, PAD_ID_TAG, PAD_ID_WORD
-from neuronlp2.io.common import ROOT, END, ROOT_CHAR, ROOT_POS, ROOT_TYPE, END_CHAR, END_POS, END_TYPE
+from neuronlp2.io.common import (
+    PAD_CHAR,
+    PAD,
+    PAD_POS,
+    PAD_TYPE,
+    PAD_ID_CHAR,
+    PAD_ID_TAG,
+    PAD_ID_WORD,
+)
+from neuronlp2.io.common import (
+    ROOT,
+    END,
+    ROOT_CHAR,
+    ROOT_POS,
+    ROOT_TYPE,
+    END_CHAR,
+    END_POS,
+    END_TYPE,
+)
 
 # Special vocabulary symbols - we always put them at the start.
 _START_VOCAB = [PAD, ROOT, END]
@@ -19,39 +36,49 @@ NUM_SYMBOLIC_TAGS = 3
 _buckets = [10, 15, 20, 25, 30, 35, 40, 50, 60, 70, 140]
 
 
-def create_alphabets(alphabet_directory, train_path, data_paths=None, max_vocabulary_size=100000, embedd_dict=None,
-                     min_occurrence=1, normalize_digits=True):
-
+def create_alphabets(
+    alphabet_directory,
+    train_path,
+    data_paths=None,
+    max_vocabulary_size=100000,
+    embedd_dict=None,
+    min_occurrence=1,
+    normalize_digits=True,
+):
     def expand_vocab():
         vocab_set = set(vocab_list)
         for data_path in data_paths:
             # logger.info("Processing data: %s" % data_path)
-            with open(data_path, 'r') as file:
+            with open(data_path, "r") as file:
                 for line in file:
                     line = line.strip()
                     if len(line) == 0:
                         continue
 
-                    tokens = line.split('\t')
+                    tokens = line.split("\t")
                     for char in tokens[1]:
                         char_alphabet.add(char)
 
-                    word = DIGIT_RE.sub("0", tokens[1]) if normalize_digits else tokens[1]
+                    word = (
+                        DIGIT_RE.sub("0", tokens[1]) if normalize_digits else tokens[1]
+                    )
                     pos = tokens[4]
                     type = tokens[7]
 
                     pos_alphabet.add(pos)
                     type_alphabet.add(type)
 
-                    if word not in vocab_set and (word in embedd_dict or word.lower() in embedd_dict):
+                    if word not in vocab_set and (
+                        word in embedd_dict or word.lower() in embedd_dict
+                    ):
                         vocab_set.add(word)
                         vocab_list.append(word)
 
     logger = get_logger("Create Alphabets")
-    word_alphabet = Alphabet('word', default_value=True, singleton=True)
-    char_alphabet = Alphabet('character', default_value=True)
-    pos_alphabet = Alphabet('pos')
-    type_alphabet = Alphabet('type')
+    word_alphabet = Alphabet("word", default_value=True, singleton=True)
+    char_alphabet = Alphabet("character", default_value=True)
+    pos_alphabet = Alphabet("pos")
+    type_alphabet = Alphabet("type")
     if not os.path.isdir(alphabet_directory):
         logger.info("Creating Alphabets: %s" % alphabet_directory)
 
@@ -68,13 +95,13 @@ def create_alphabets(alphabet_directory, train_path, data_paths=None, max_vocabu
         type_alphabet.add(END_TYPE)
 
         vocab = defaultdict(int)
-        with open(train_path, 'r') as file:
+        with open(train_path, "r") as file:
             for line in file:
                 line = line.strip()
                 if len(line) == 0:
                     continue
 
-                tokens = line.split('\t')
+                tokens = line.split("\t")
                 for char in tokens[1]:
                     char_alphabet.add(char)
 
@@ -88,7 +115,9 @@ def create_alphabets(alphabet_directory, train_path, data_paths=None, max_vocabu
                 type_alphabet.add(type)
 
         # collect singletons
-        singletons = set([word for word, count in vocab.items() if count <= min_occurrence])
+        singletons = set(
+            [word for word, count in vocab.items() if count <= min_occurrence]
+        )
 
         # if a singleton is in pretrained embedding dict, set the count to min_occur + c
         if embedd_dict is not None:
@@ -100,7 +129,11 @@ def create_alphabets(alphabet_directory, train_path, data_paths=None, max_vocabu
         vocab_list = _START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
         logger.info("Total Vocabulary Size: %d" % len(vocab_list))
         logger.info("Total Singleton Size:  %d" % len(singletons))
-        vocab_list = [word for word in vocab_list if word in _START_VOCAB or vocab[word] > min_occurrence]
+        vocab_list = [
+            word
+            for word in vocab_list
+            if word in _START_VOCAB or vocab[word] > min_occurrence
+        ]
         logger.info("Total Vocabulary Size (w.o rare words): %d" % len(vocab_list))
 
         if len(vocab_list) > max_vocabulary_size:
@@ -128,35 +161,59 @@ def create_alphabets(alphabet_directory, train_path, data_paths=None, max_vocabu
     char_alphabet.close()
     pos_alphabet.close()
     type_alphabet.close()
-    logger.info("Word Alphabet Size (Singleton): %d (%d)" % (word_alphabet.size(), word_alphabet.singleton_size()))
+    logger.info(
+        "Word Alphabet Size (Singleton): %d (%d)"
+        % (word_alphabet.size(), word_alphabet.singleton_size())
+    )
     logger.info("Character Alphabet Size: %d" % char_alphabet.size())
     logger.info("POS Alphabet Size: %d" % pos_alphabet.size())
     logger.info("Type Alphabet Size: %d" % type_alphabet.size())
     return word_alphabet, char_alphabet, pos_alphabet, type_alphabet
 
 
-def read_data(source_path: str, word_alphabet: Alphabet, char_alphabet: Alphabet, pos_alphabet: Alphabet, type_alphabet: Alphabet,
-              max_size=None, normalize_digits=True, symbolic_root=False, symbolic_end=False):
+def read_data(
+    source_path: str,
+    word_alphabet: Alphabet,
+    char_alphabet: Alphabet,
+    pos_alphabet: Alphabet,
+    type_alphabet: Alphabet,
+    max_size=None,
+    normalize_digits=True,
+    symbolic_root=False,
+    symbolic_end=False,
+):
     data = []
     max_length = 0
     max_char_length = 0
-    print('Reading data from %s' % source_path)
+    print("Reading data from %s" % source_path)
     counter = 0
-    reader = CoNLLXReader(source_path, word_alphabet, char_alphabet, pos_alphabet, type_alphabet)
-    inst = reader.getNext(normalize_digits=normalize_digits, symbolic_root=symbolic_root, symbolic_end=symbolic_end)
+    reader = CoNLLXReader(
+        source_path, word_alphabet, char_alphabet, pos_alphabet, type_alphabet
+    )
+    inst = reader.getNext(
+        normalize_digits=normalize_digits,
+        symbolic_root=symbolic_root,
+        symbolic_end=symbolic_end,
+    )
     while inst is not None and (not max_size or counter < max_size):
         counter += 1
         if counter % 10000 == 0:
             print("reading data: %d" % counter)
 
         sent = inst.sentence
-        data.append([sent.word_ids, sent.char_id_seqs, inst.pos_ids, inst.heads, inst.type_ids])
+        data.append(
+            [sent.word_ids, sent.char_id_seqs, inst.pos_ids, inst.heads, inst.type_ids]
+        )
         max_len = max([len(char_seq) for char_seq in sent.char_seqs])
         if max_char_length < max_len:
             max_char_length = max_len
         if max_length < inst.length():
             max_length = inst.length()
-        inst = reader.getNext(normalize_digits=normalize_digits, symbolic_root=symbolic_root, symbolic_end=symbolic_end)
+        inst = reader.getNext(
+            normalize_digits=normalize_digits,
+            symbolic_root=symbolic_root,
+            symbolic_end=symbolic_end,
+        )
     reader.close()
     print("Total number of data: %d" % counter)
 
@@ -180,8 +237,8 @@ def read_data(source_path: str, word_alphabet: Alphabet, char_alphabet: Alphabet
         wid_inputs[i, :inst_size] = wids
         wid_inputs[i, inst_size:] = PAD_ID_WORD
         for c, cids in enumerate(cid_seqs):
-            cid_inputs[i, c, :len(cids)] = cids
-            cid_inputs[i, c, len(cids):] = PAD_ID_CHAR
+            cid_inputs[i, c, : len(cids)] = cids
+            cid_inputs[i, c, len(cids) :] = PAD_ID_CHAR
         cid_inputs[i, inst_size:, :] = PAD_ID_CHAR
         # pos ids
         pid_inputs[i, :inst_size] = pids
@@ -207,19 +264,42 @@ def read_data(source_path: str, word_alphabet: Alphabet, char_alphabet: Alphabet
     single = torch.from_numpy(single)
     lengths = torch.from_numpy(lengths)
 
-    data_tensor = {'WORD': words, 'CHAR': chars, 'POS': pos, 'HEAD': heads, 'TYPE': types,
-                   'MASK': masks, 'SINGLE': single, 'LENGTH': lengths}
+    data_tensor = {
+        "WORD": words,
+        "CHAR": chars,
+        "POS": pos,
+        "HEAD": heads,
+        "TYPE": types,
+        "MASK": masks,
+        "SINGLE": single,
+        "LENGTH": lengths,
+    }
     return data_tensor, data_size
 
 
-def read_bucketed_data(source_path: str, word_alphabet: Alphabet, char_alphabet: Alphabet, pos_alphabet: Alphabet, type_alphabet: Alphabet,
-                       max_size=None, normalize_digits=True, symbolic_root=False, symbolic_end=False):
+def read_bucketed_data(
+    source_path: str,
+    word_alphabet: Alphabet,
+    char_alphabet: Alphabet,
+    pos_alphabet: Alphabet,
+    type_alphabet: Alphabet,
+    max_size=None,
+    normalize_digits=True,
+    symbolic_root=False,
+    symbolic_end=False,
+):
     data = [[] for _ in _buckets]
     max_char_length = [0 for _ in _buckets]
-    print('Reading data from %s' % source_path)
+    print("Reading data from %s" % source_path)
     counter = 0
-    reader = CoNLLXReader(source_path, word_alphabet, char_alphabet, pos_alphabet, type_alphabet)
-    inst = reader.getNext(normalize_digits=normalize_digits, symbolic_root=symbolic_root, symbolic_end=symbolic_end)
+    reader = CoNLLXReader(
+        source_path, word_alphabet, char_alphabet, pos_alphabet, type_alphabet
+    )
+    inst = reader.getNext(
+        normalize_digits=normalize_digits,
+        symbolic_root=symbolic_root,
+        symbolic_end=symbolic_end,
+    )
     while inst is not None and (not max_size or counter < max_size):
         counter += 1
         if counter % 10000 == 0:
@@ -229,13 +309,25 @@ def read_bucketed_data(source_path: str, word_alphabet: Alphabet, char_alphabet:
         sent = inst.sentence
         for bucket_id, bucket_size in enumerate(_buckets):
             if inst_size < bucket_size:
-                data[bucket_id].append([sent.word_ids, sent.char_id_seqs, inst.pos_ids, inst.heads, inst.type_ids])
+                data[bucket_id].append(
+                    [
+                        sent.word_ids,
+                        sent.char_id_seqs,
+                        inst.pos_ids,
+                        inst.heads,
+                        inst.type_ids,
+                    ]
+                )
                 max_len = max([len(char_seq) for char_seq in sent.char_seqs])
                 if max_char_length[bucket_id] < max_len:
                     max_char_length[bucket_id] = max_len
                 break
 
-        inst = reader.getNext(normalize_digits=normalize_digits, symbolic_root=symbolic_root, symbolic_end=symbolic_end)
+        inst = reader.getNext(
+            normalize_digits=normalize_digits,
+            symbolic_root=symbolic_root,
+            symbolic_end=symbolic_end,
+        )
     reader.close()
     print("Total number of data: %d" % counter)
 
@@ -267,8 +359,8 @@ def read_bucketed_data(source_path: str, word_alphabet: Alphabet, char_alphabet:
             wid_inputs[i, :inst_size] = wids
             wid_inputs[i, inst_size:] = PAD_ID_WORD
             for c, cids in enumerate(cid_seqs):
-                cid_inputs[i, c, :len(cids)] = cids
-                cid_inputs[i, c, len(cids):] = PAD_ID_CHAR
+                cid_inputs[i, c, : len(cids)] = cids
+                cid_inputs[i, c, len(cids) :] = PAD_ID_CHAR
             cid_inputs[i, inst_size:, :] = PAD_ID_CHAR
             # pos ids
             pid_inputs[i, :inst_size] = pids
@@ -294,7 +386,15 @@ def read_bucketed_data(source_path: str, word_alphabet: Alphabet, char_alphabet:
         single = torch.from_numpy(single)
         lengths = torch.from_numpy(lengths)
 
-        data_tensor = {'WORD': words, 'CHAR': chars, 'POS': pos, 'HEAD': heads, 'TYPE': types,
-                       'MASK': masks, 'SINGLE': single, 'LENGTH': lengths}
+        data_tensor = {
+            "WORD": words,
+            "CHAR": chars,
+            "POS": pos,
+            "HEAD": heads,
+            "TYPE": types,
+            "MASK": masks,
+            "SINGLE": single,
+            "LENGTH": lengths,
+        }
         data_tensors.append(data_tensor)
     return data_tensors, bucket_sizes
