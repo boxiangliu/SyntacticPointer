@@ -1,6 +1,7 @@
 from logging import Logger
 import os
 import json
+import numpy as np
 
 import torch
 from torch import nn
@@ -97,19 +98,23 @@ class Parsing(pl.LightningModule):
         logger.info("POS Alphabet Size: %d" % num_pos)
         logger.info("Type Alphabet Size: %d" % num_types)
 
-        result_path = os.path.join(model_path, 'tmp')
+        result_path = os.path.join(model_path, "tmp")
         if not os.path.exists(result_path):
             os.makedirs(result_path)
 
         punct_set = None
         if punctuation is not None:
             punct_set = set(punctuation)
-            logger.info("punctuations(%d): %s" % (len(punct_set), ' '.join(punct_set)))
+            logger.info("punctuations(%d): %s" % (len(punct_set), " ".join(punct_set)))
 
         def construct_word_embedding_table():
             scale = np.sqrt(3.0 / word_dim)
             table = np.empty([word_alphabet.size(), word_dim], dtype=np.float32)
-            table[conllx_data.UNK_ID, :] = np.zeros([1, word_dim]).astype(np.float32) if freeze else np.random.uniform(-scale, scale, [1, word_dim]).astype(np.float32)
+            table[conllx_data.UNK_ID, :] = (
+                np.zeros([1, word_dim]).astype(np.float32)
+                if freeze
+                else np.random.uniform(-scale, scale, [1, word_dim]).astype(np.float32)
+            )
             oov = 0
             for word, index in word_alphabet.items():
                 if word in word_dict:
@@ -117,12 +122,17 @@ class Parsing(pl.LightningModule):
                 elif word.lower() in word_dict:
                     embedding = word_dict[word.lower()]
                 else:
-                    embedding = np.zeros([1, word_dim]).astype(np.float32) if freeze else np.random.uniform(-scale, scale, [1, word_dim]).astype(np.float32)
+                    embedding = (
+                        np.zeros([1, word_dim]).astype(np.float32)
+                        if freeze
+                        else np.random.uniform(-scale, scale, [1, word_dim]).astype(
+                            np.float32
+                        )
+                    )
                     oov += 1
                 table[index, :] = embedding
-            print('word OOV: %d' % oov)
+            print("word OOV: %d" % oov)
             return torch.from_numpy(table)
-
 
         def construct_char_embedding_table():
             if char_dict is None:
@@ -130,16 +140,23 @@ class Parsing(pl.LightningModule):
 
             scale = np.sqrt(3.0 / char_dim)
             table = np.empty([num_chars, char_dim], dtype=np.float32)
-            table[conllx_data.UNK_ID, :] = np.random.uniform(-scale, scale, [1, char_dim]).astype(np.float32)
+            table[conllx_data.UNK_ID, :] = np.random.uniform(
+                -scale, scale, [1, char_dim]
+            ).astype(np.float32)
             oov = 0
-            for char, index, in char_alphabet.items():
+            for (
+                char,
+                index,
+            ) in char_alphabet.items():
                 if char in char_dict:
                     embedding = char_dict[char]
                 else:
-                    embedding = np.random.uniform(-scale, scale, [1, char_dim]).astype(np.float32)
+                    embedding = np.random.uniform(-scale, scale, [1, char_dim]).astype(
+                        np.float32
+                    )
                     oov += 1
                 table[index, :] = embedding
-            print('character OOV: %d' % oov)
+            print("character OOV: %d" % oov)
             return torch.from_numpy(table)
 
         word_table = construct_word_embedding_table()
@@ -198,16 +215,23 @@ class Parsing(pl.LightningModule):
                 sibling=sibling,
             )
 
-
         model = "{}-{}".format(model_type, mode)
-        logger.info("Network: %s, num_layer=%s, hidden=%d, act=%s" % (model, num_layers, hidden_size, activation))
-        logger.info("dropout(in, out, rnn): %s(%.2f, %.2f, %s)" % ('variational', p_in, p_out, p_rnn))
-        logger.info('# of Parameters: %d' % (sum([param.numel() for param in network.parameters()])))
+        logger.info(
+            "Network: %s, num_layer=%s, hidden=%d, act=%s"
+            % (model, num_layers, hidden_size, activation)
+        )
+        logger.info(
+            "dropout(in, out, rnn): %s(%.2f, %.2f, %s)"
+            % ("variational", p_in, p_out, p_rnn)
+        )
+        logger.info(
+            "# of Parameters: %d"
+            % (sum([param.numel() for param in network.parameters()]))
+        )
 
         logger.info("Reading Data")
         # START HERE: implement read_data and read_bucketed data
 
-        
     def forward(self):
         raise NotImplementedError()
 
