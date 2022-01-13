@@ -3,3 +3,7 @@ __pycache__
 experiments/data/
 experiments/embs/
 experiments/models/
+tests/alphabets/character.json
+tests/alphabets/pos.json
+tests/alphabets/type.json
+tests/alphabets/word.json

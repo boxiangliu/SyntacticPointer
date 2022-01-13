@@ -1,5 +1,4 @@
-from torch import optim
-from lightning.optim import ExponentialScheduler
+from lightning.optim.optim import ExponentialScheduler
 from torch import nn
 from torch.optim import SGD
 from torch.optim.lr_scheduler import ExponentialLR
