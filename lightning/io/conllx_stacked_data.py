@@ -2,10 +2,10 @@ __author__ = "max"
 
 import numpy as np
 import torch
-from neuronlp2.io.reader import CoNLLXReader
-from neuronlp2.io.conllx_data import _buckets, NUM_SYMBOLIC_TAGS, create_alphabets
-from neuronlp2.io.common import DIGIT_RE, MAX_CHAR_LENGTH, UNK_ID
-from neuronlp2.io.common import (
+from lightning.io.reader import CoNLLXReader
+from lightning.io.conllx_data import _buckets, NUM_SYMBOLIC_TAGS, create_alphabets
+from lightning.io.common import DIGIT_RE, MAX_CHAR_LENGTH, UNK_ID
+from lightning.io.common import (
     PAD_CHAR,
     PAD,
     PAD_POS,
@@ -14,7 +14,7 @@ from neuronlp2.io.common import (
     PAD_ID_TAG,
     PAD_ID_WORD,
 )
-from neuronlp2.io.common import (
+from lightning.io.common import (
     ROOT,
     END,
     ROOT_CHAR,
@@ -26,142 +26,26 @@ from neuronlp2.io.common import (
 )
 
 
-def _obtain_child_index_for_left2right(heads):
-    child_ids = [[] for _ in range(len(heads))]
-    # skip the symbolic root.
-    for child in range(1, len(heads)):
-        head = heads[child]
-        child_ids[head].append(child)
-    return child_ids
-
-
-def _obtain_child_index_for_inside_out(heads):
-    child_ids = [[] for _ in range(len(heads))]
-    for head in range(len(heads)):
-        # first find left children inside-out
-        for child in reversed(range(1, head)):
-            if heads[child] == head:
-                child_ids[head].append(child)
-        # second find right children inside-out
-        for child in range(head + 1, len(heads)):
-            if heads[child] == head:
-                child_ids[head].append(child)
-    return child_ids
-
-
-def _obtain_child_index_for_depth(heads, reverse):
-    def calc_depth(head):
-        children = child_ids[head]
-        max_depth = 0
-        for child in children:
-            depth = calc_depth(child)
-            child_with_depth[head].append((child, depth))
-            max_depth = max(max_depth, depth + 1)
-        child_with_depth[head] = sorted(
-            child_with_depth[head], key=lambda x: x[1], reverse=reverse
-        )
-        return max_depth
-
-    child_ids = _obtain_child_index_for_left2right(heads)
-    child_with_depth = [[] for _ in range(len(heads))]
-    calc_depth(0)
-    return [
-        [child for child, depth in child_with_depth[head]] for head in range(len(heads))
-    ]
-
-
-def _OLDgenerate_stack_inputs(heads, types, prior_order):
-    if prior_order == "deep_first":
-        child_ids = _obtain_child_index_for_depth(heads, True)
-    elif prior_order == "shallow_first":
-        child_ids = _obtain_child_index_for_depth(heads, False)
-    elif prior_order == "left2right":
-        child_ids = _obtain_child_index_for_left2right(heads)
-    elif prior_order == "inside_out":
-        child_ids = _obtain_child_index_for_inside_out(heads)
-    else:
-        raise ValueError("Unknown prior order: %s" % prior_order)
-
-    stacked_heads = []
-    children = []
-    siblings = []
-    stacked_types = []
-    skip_connect = []
-    prev = [0 for _ in range(len(heads))]
-    sibs = [0 for _ in range(len(heads))]
-    stack = [0]
-    position = 1
-    while len(stack) > 0:
-        head = stack[-1]
-        stacked_heads.append(head)
-        siblings.append(sibs[head])
-        child_id = child_ids[head]
-        skip_connect.append(prev[head])
-        prev[head] = position
-        if len(child_id) == 0:
-            children.append(head)
-            sibs[head] = 0
-            stacked_types.append(PAD_ID_TAG)
-            stack.pop()
-        else:
-            child = child_id.pop(0)
-            children.append(child)
-            sibs[head] = child
-            stack.append(child)
-            stacked_types.append(types[child])
-        position += 1
-
-    return stacked_heads, children, siblings, stacked_types, skip_connect
-
-
-def _generate_stack_inputs(heads, types, prior_order):
-
+def _generate_stack_inputs(heads, types):
     stacked_heads = []
     children = [0 for _ in range(len(heads) - 1)]
-    siblings = []
-    previous = []
-    next = []
     stacked_types = []
-    skip_connect = []
-    prev = [0 for _ in range(len(heads))]
-    sibs = [0 for _ in range(len(heads))]
-    newheads = [-1 for _ in range(len(heads))]
-    newheads[0] = 0
 
-    stack = [1]
     position = 1
-
     for child in range(len(heads)):
         if child == 0:
             continue
         stacked_heads.append(child)
-        if child == len(heads) - 1:
-            next.append(0)
-        else:
-            next.append(child + 1)
-        previous.append(child - 1)
         head = heads[child]
-        newheads[child] = head
-        siblings.append(sibs[head])
-        skip_connect.append(prev[head])
-        prev[head] = position
         children[child - 1] = head
-        sibs[head] = child
         stacked_types.append(types[child])
         position += 1
-
-    # print('stacked', stacked_heads)
-    # print('stktype', stacked_types)
-    # print('childre', children)
-    # exit(0)
 
     return (
         stacked_heads,
         children,
-        siblings,
         stacked_types,
-        skip_connect,
-    )  # , previous, next
+    )
 
 
 def read_data(
@@ -172,7 +56,6 @@ def read_data(
     type_alphabet,
     max_size=None,
     normalize_digits=True,
-    prior_order="inside_out",
 ):
     data = []
     max_length = 0
@@ -191,13 +74,13 @@ def read_data(
             print("reading data: %d" % counter)
 
         sent = inst.sentence
+
         (
             stacked_heads,
             children,
-            siblings,
             stacked_types,
-            skip_connect,
-        ) = _generate_stack_inputs(inst.heads, inst.type_ids, prior_order)
+        ) = _generate_stack_inputs(inst.heads, inst.type_ids)
+
         data.append(
             [
                 sent.word_ids,
@@ -207,9 +90,7 @@ def read_data(
                 inst.type_ids,
                 stacked_heads,
                 children,
-                siblings,
                 stacked_types,
-                skip_connect,
             ]
         )
         max_len = max([len(char_seq) for char_seq in sent.char_seqs])
@@ -235,21 +116,9 @@ def read_data(
     single = np.zeros([data_size, max_length], dtype=np.int64)
     lengths = np.empty(data_size, dtype=np.int64)
 
-    """
-    stack_hid_inputs = np.empty([data_size, 2 * max_length - 1], dtype=np.int64)
-    chid_inputs = np.empty([data_size, 2 * max_length - 1], dtype=np.int64)
-    ssid_inputs = np.empty([data_size, 2 * max_length - 1], dtype=np.int64)
-    stack_tid_inputs = np.empty([data_size, 2 * max_length - 1], dtype=np.int64)
-    skip_connect_inputs = np.empty([data_size, 2 * max_length - 1], dtype=np.int64)
-
-    masks_d = np.zeros([data_size, 2 * max_length - 1], dtype=np.float32)
-    """
-
     stack_hid_inputs = np.empty([data_size, max_length - 1], dtype=np.int64)
     chid_inputs = np.empty([data_size, max_length - 1], dtype=np.int64)
-    ssid_inputs = np.empty([data_size, max_length - 1], dtype=np.int64)
     stack_tid_inputs = np.empty([data_size, max_length - 1], dtype=np.int64)
-    skip_connect_inputs = np.empty([data_size, max_length - 1], dtype=np.int64)
 
     masks_d = np.zeros([data_size, max_length - 1], dtype=np.float32)
 
@@ -262,9 +131,7 @@ def read_data(
             tids,
             stack_hids,
             chids,
-            ssids,
             stack_tids,
-            skip_ids,
         ) = inst
         inst_size = len(wids)
         lengths[i] = inst_size
@@ -298,15 +165,9 @@ def read_data(
         # children
         chid_inputs[i, :inst_size_decoder] = chids
         chid_inputs[i, inst_size_decoder:] = PAD_ID_TAG
-        # siblings
-        ssid_inputs[i, :inst_size_decoder] = ssids
-        ssid_inputs[i, inst_size_decoder:] = PAD_ID_TAG
         # stacked types
         stack_tid_inputs[i, :inst_size_decoder] = stack_tids
         stack_tid_inputs[i, inst_size_decoder:] = PAD_ID_TAG
-        # skip connects
-        skip_connect_inputs[i, :inst_size_decoder] = skip_ids
-        skip_connect_inputs[i, inst_size_decoder:] = PAD_ID_TAG
         # masks_d
         masks_d[i, :inst_size_decoder] = 1.0
 
@@ -321,9 +182,7 @@ def read_data(
 
     stacked_heads = torch.from_numpy(stack_hid_inputs)
     children = torch.from_numpy(chid_inputs)
-    siblings = torch.from_numpy(ssid_inputs)
     stacked_types = torch.from_numpy(stack_tid_inputs)
-    skip_connect = torch.from_numpy(skip_connect_inputs)
     masks_d = torch.from_numpy(masks_d)
 
     data_tensor = {
@@ -337,9 +196,7 @@ def read_data(
         "LENGTH": lengths,
         "STACK_HEAD": stacked_heads,
         "CHILD": children,
-        "SIBLING": siblings,
         "STACK_TYPE": stacked_types,
-        "SKIP_CONNECT": skip_connect,
         "MASK_DEC": masks_d,
     }
     return data_tensor, data_size
@@ -353,7 +210,6 @@ def read_bucketed_data(
     type_alphabet,
     max_size=None,
     normalize_digits=True,
-    prior_order="inside_out",
 ):
     data = [[] for _ in _buckets]
     max_char_length = [0 for _ in _buckets]
@@ -377,10 +233,9 @@ def read_bucketed_data(
                 (
                     stacked_heads,
                     children,
-                    siblings,
                     stacked_types,
-                    skip_connect,
-                ) = _generate_stack_inputs(inst.heads, inst.type_ids, prior_order)
+                ) = _generate_stack_inputs(inst.heads, inst.type_ids)
+
                 data[bucket_id].append(
                     [
                         sent.word_ids,
@@ -390,9 +245,7 @@ def read_bucketed_data(
                         inst.type_ids,
                         stacked_heads,
                         children,
-                        siblings,
                         stacked_types,
-                        skip_connect,
                     ]
                 )
                 max_len = max([len(char_seq) for char_seq in sent.char_seqs])
@@ -426,21 +279,9 @@ def read_bucketed_data(
         single = np.zeros([bucket_size, bucket_length], dtype=np.int64)
         lengths = np.empty(bucket_size, dtype=np.int64)
 
-        """
-        stack_hid_inputs = np.empty([bucket_size, 2 * bucket_length - 1], dtype=np.int64)
-        chid_inputs = np.empty([bucket_size, 2 * bucket_length - 1], dtype=np.int64)
-        ssid_inputs = np.empty([bucket_size, 2 * bucket_length - 1], dtype=np.int64)
-        stack_tid_inputs = np.empty([bucket_size, 2 * bucket_length - 1], dtype=np.int64)
-        skip_connect_inputs = np.empty([bucket_size, 2 * bucket_length - 1], dtype=np.int64)
-
-        masks_d = np.zeros([bucket_size, 2 * bucket_length - 1], dtype=np.float32)
-        """
-
         stack_hid_inputs = np.empty([bucket_size, bucket_length - 1], dtype=np.int64)
         chid_inputs = np.empty([bucket_size, bucket_length - 1], dtype=np.int64)
-        ssid_inputs = np.empty([bucket_size, bucket_length - 1], dtype=np.int64)
         stack_tid_inputs = np.empty([bucket_size, bucket_length - 1], dtype=np.int64)
-        skip_connect_inputs = np.empty([bucket_size, bucket_length - 1], dtype=np.int64)
 
         masks_d = np.zeros([bucket_size, bucket_length - 1], dtype=np.float32)
 
@@ -453,9 +294,7 @@ def read_bucketed_data(
                 tids,
                 stack_hids,
                 chids,
-                ssids,
                 stack_tids,
-                skip_ids,
             ) = inst
             inst_size = len(wids)
             lengths[i] = inst_size
@@ -489,15 +328,9 @@ def read_bucketed_data(
             # children
             chid_inputs[i, :inst_size_decoder] = chids
             chid_inputs[i, inst_size_decoder:] = PAD_ID_TAG
-            # siblings
-            ssid_inputs[i, :inst_size_decoder] = ssids
-            ssid_inputs[i, inst_size_decoder:] = PAD_ID_TAG
             # stacked types
             stack_tid_inputs[i, :inst_size_decoder] = stack_tids
             stack_tid_inputs[i, inst_size_decoder:] = PAD_ID_TAG
-            # skip connects
-            skip_connect_inputs[i, :inst_size_decoder] = skip_ids
-            skip_connect_inputs[i, inst_size_decoder:] = PAD_ID_TAG
             # masks_d
             masks_d[i, :inst_size_decoder] = 1.0
 
@@ -512,9 +345,7 @@ def read_bucketed_data(
 
         stacked_heads = torch.from_numpy(stack_hid_inputs)
         children = torch.from_numpy(chid_inputs)
-        siblings = torch.from_numpy(ssid_inputs)
         stacked_types = torch.from_numpy(stack_tid_inputs)
-        skip_connect = torch.from_numpy(skip_connect_inputs)
         masks_d = torch.from_numpy(masks_d)
 
         data_tensor = {
@@ -528,9 +359,7 @@ def read_bucketed_data(
             "LENGTH": lengths,
             "STACK_HEAD": stacked_heads,
             "CHILD": children,
-            "SIBLING": siblings,
             "STACK_TYPE": stacked_types,
-            "SKIP_CONNECT": skip_connect,
             "MASK_DEC": masks_d,
         }
         data_tensors.append(data_tensor)

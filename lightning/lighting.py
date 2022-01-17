@@ -301,3 +301,8 @@ class Parsing(pl.LightningModule):
 
     def test_dataloader(self):
         pass
+
+
+class PTBData(pl.LightningDataModule):
+    def __init__(self):
+        raise NotImplemented
