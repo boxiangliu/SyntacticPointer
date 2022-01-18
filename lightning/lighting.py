@@ -6,7 +6,6 @@ import numpy as np
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 from torch.optim import Adam
 
 import pytorch_lightning as pl
@@ -301,8 +300,3 @@ class Parsing(pl.LightningModule):
 
     def test_dataloader(self):
         pass
-
-
-class PTBData(pl.LightningDataModule):
-    def __init__(self):
-        raise NotImplemented
