@@ -277,7 +277,7 @@ class Parsing(pl.LightningModule):
     def configure_optimizers(self):
         if self.optim == "Adam":
             return Adam(
-                self.model.parameters(),
+                self.network.parameters(),
                 lr=self.learning_rate,
                 betas=(self.beta1, self.beta2),
                 eps=self.eps,

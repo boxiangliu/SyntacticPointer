@@ -1,4 +1,4 @@
-from lightning.lightning import Parsing
+from lightning.lightning_module import Parsing
 from lightning.data import PTBData
 import pytest
 import torch

@@ -44,7 +44,7 @@ class PTBData(pl.LightningDataModule):
         self.char_path = char_path
         self.batch_size = batch_size
 
-    def setup(self):
+    def setup(self, stage=None):
         word_dict, word_dim = utils.load_embedding_dict(
             self.word_embedding, self.word_path
         )
