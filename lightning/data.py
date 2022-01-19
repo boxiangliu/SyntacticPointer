@@ -1,8 +1,22 @@
+from audioop import reverse
 import pytorch_lightning as pl
 
 from lightning.io import conllx_data, conllx_stacked_data
 from lightning import utils
 from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
+
+
+class DictDataSet(Dataset):
+    def __init__(self, data: dict, size: int):
+        self.data = data
+        self.size = size
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx: int):
+        return dict([(k, v[idx]) for k, v in self.data.items()])
 
 
 class PTBData(pl.LightningDataModule):
@@ -48,23 +62,26 @@ class PTBData(pl.LightningDataModule):
             max_vocabulary_size=200000,
         )
 
-        self.data_train = conllx_stacked_data.read_data(
+        self.data_train, self.train_size = conllx_stacked_data.read_data(
             self.train_path, word_alphabet, char_alphabet, pos_alphabet, type_alphabet
         )
 
-        self.data_dev = conllx_stacked_data.read_data(
+        self.data_dev, self.dev_size = conllx_stacked_data.read_data(
             self.dev_path, word_alphabet, char_alphabet, pos_alphabet, type_alphabet
         )
 
-        self.data_test = conllx_stacked_data.read_data(
+        self.data_test, self.test_size = conllx_stacked_data.read_data(
             self.test_path, word_alphabet, char_alphabet, pos_alphabet, type_alphabet
         )
 
     def train_dataloader(self):
-        return DataLoader(self.data_train, batch_size=self.batch_size)
+        data_train = DictDataSet(self.data_train, self.train_size)
+        return DataLoader(data_train, batch_size=self.batch_size)
 
     def val_dataloader(self):
-        return DataLoader(self.data_dev, batch_size=self.batch_size)
+        data_dev = DictDataSet(self.data_dev, self.dev_size)
+        return DataLoader(data_dev, batch_size=self.batch_size)
 
     def test_dataloader(self):
-        return DataLoader(self.data_test, batch_size=self.batch_size)
+        data_test = DictDataSet(self.data_test, self.test_size)
+        return DataLoader(data_test, batch_size=self.batch_size)

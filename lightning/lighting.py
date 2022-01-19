@@ -1,18 +1,14 @@
-from logging import Logger
 import os
 import json
 import numpy as np
 
 import torch
-from torch import nn
-import torch.nn.functional as F
 from torch.optim import Adam
 
 import pytorch_lightning as pl
-from lightning.nn import CharCNN
-from lightning.models import L2RPtrNet
+from lightning.models.models import L2RPtrNet
 from lightning import utils
-from lightning.io import get_logger
+from lightning.io.logger import get_logger
 from lightning.io import conllx_data
 
 
@@ -20,6 +16,9 @@ class Parsing(pl.LightningModule):
     def __init__(
         self,
         config,
+        train_path,
+        dev_path,
+        test_path,
         model_path,
         word_path,
         char_path=None,
@@ -143,10 +142,7 @@ class Parsing(pl.LightningModule):
                 -scale, scale, [1, char_dim]
             ).astype(np.float32)
             oov = 0
-            for (
-                char,
-                index,
-            ) in char_alphabet.items():
+            for (char, index) in char_alphabet.items():
                 if char in char_dict:
                     embedding = char_dict[char]
                 else:
@@ -181,7 +177,7 @@ class Parsing(pl.LightningModule):
         activation = hyps["activation"]
         prior_order = None
 
-        if self.model_type == "L2RPtr":
+        if model_type == "L2RPtr":
             encoder_layers = hyps["encoder_layers"]
             decoder_layers = hyps["decoder_layers"]
             num_layers = (encoder_layers, decoder_layers)
@@ -227,9 +223,6 @@ class Parsing(pl.LightningModule):
             "# of Parameters: %d"
             % (sum([param.numel() for param in network.parameters()]))
         )
-
-        logger.info("Reading Data")
-        # START HERE: implement read_data and read_bucketed data
 
     def forward(self):
         raise NotImplementedError()
@@ -291,12 +284,3 @@ class Parsing(pl.LightningModule):
             )
         else:
             raise NotImplementedError
-
-    def train_dataloader(self):
-        pass
-
-    def val_dataloader(self):
-        pass
-
-    def test_dataloader(self):
-        pass

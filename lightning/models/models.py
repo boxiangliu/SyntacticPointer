@@ -1,6 +1,6 @@
 from torch import nn
 import torch
-from lightning.nn import CharCNN, BiAffine, BiLinear
+from lightning.nn.modules import CharCNN, BiAffine, BiLinear
 from enum import Enum
 from neuronlp2.nn import VarFastLSTM
 
