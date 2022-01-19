@@ -40,7 +40,8 @@ class L2RPtrNet(nn.Module):
         activation="elu",
         remove_cycles=False,
     ):
-        super().__init__()
+
+        super(L2RPtrNet, self).__init__()
         self.word_embed = nn.Embedding(
             num_words, word_dim, _weight=embedd_word, padding_idx=1
         )
@@ -67,7 +68,7 @@ class L2RPtrNet(nn.Module):
         elif prior_order == "left2right":
             self.prior_order = PriorOrder.LEFT2RIGTH
         else:
-            raise ValueError("Unknown prior order: {}".format(prior_order))
+            raise ValueError("Unknown prior order: %s" % prior_order)
 
         self.grandPar = grandPar
         self.sibling = sibling
@@ -77,7 +78,7 @@ class L2RPtrNet(nn.Module):
             RNN_ENCODER = VarFastLSTM
             RNN_DECODER = VarFastLSTM
         else:
-            raise ValueError("Unknown RNN mode: {}".format(rnn_mode))
+            raise ValueError("Unknown RNN mode: %s" % rnn_mode)
 
         dim_enc = word_dim + char_dim
         if pos:
@@ -159,7 +160,7 @@ class L2RPtrNet(nn.Module):
         word = self.dropout_in(word)
         char = self.dropout_in(char)
 
-        # concatenate word and char, [batch, length, word_dim + char_filter]
+        # concatenate word and char [batch, length, word_dim+char_filter]
         enc = torch.cat([word, char], dim=2)
 
         if self.pos_embed is not None:
@@ -171,9 +172,8 @@ class L2RPtrNet(nn.Module):
 
         # output from rnn [batch, length, hidden_size]
         output, hn = self.encoder(enc, mask)
-
         # apply dropout
-        # [batch, length, hidden_size] -> [batch, hidden_size, length] -> [batch, length, hidden_size]
+        # [batch, length, hidden_size] --> [batch, hidden_size, length] --> [batch, length, hidden_size]
         output = self.dropout_out(output.transpose(1, 2)).transpose(1, 2)
 
         return output, hn
@@ -193,14 +193,19 @@ class L2RPtrNet(nn.Module):
         # [batch, length_decoder, dec_dim]
         src_encoding = self.activation(self.src_dense(src_encoding))
         # output from rnn [batch, length, hidden_size]
-        output, hn = self.decoder(src, src_encoding, mask, hx=hx)
+        output, hn = self.decoder(src_encoding, mask, hx=hx)
         # apply dropout
         # [batch, length, hidden_size] -> [batch, hidden_size, length] -> [batch, length, hidden_size]
         output = self.dropout_out(output.transpose(1, 2)).transpose(1, 2)
 
         return output, hn
 
-    def _transform_decoder_init_state(self):
+    def forward(
+        self, input_word, input_char, input_pos, mask=None, length=None, hx=None
+    ):
+        raise RuntimeError("Stack Pointer Network does not implement forward")
+
+    def _transform_decoder_init_state(self, hn):
         hn, cn = hn
         # hn dimension: [2 * num_layers, batch, hidden_size], 2 because of bidirectional
         _, batch, hidden_size = cn.size()
@@ -256,9 +261,8 @@ class L2RPtrNet(nn.Module):
         type_h = self.activation(self.type_h(output_dec))
 
         batch, max_len_d, type_space = type_h.size()
-
         # apply dropout
-        # [batch, length_decoder, hidden] + [batch, length_encoder, hidden] -> [batch, length_decoder + length_encoder, hidden]
+        # [batch, length_decoder, hidden] + [batch, length_encoder, hidden] --> [batch, length_decoder + length_encoder, hidden]
         arc = self.dropout_out(
             torch.cat([arc_h, arc_c], dim=1).transpose(1, 2)
         ).transpose(1, 2)
@@ -268,7 +272,7 @@ class L2RPtrNet(nn.Module):
         type = self.dropout_out(
             torch.cat([type_h, type_c], dim=1).transpose(1, 2)
         ).transpose(1, 2)
-        type_h = type[:, :max_len_d]
+        type_h = type[:, :max_len_d].contiguous()
         type_c = type[:, max_len_d:]
 
         # [batch, length_decoder, length_encoder]
