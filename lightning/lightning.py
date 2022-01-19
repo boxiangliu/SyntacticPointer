@@ -21,8 +21,8 @@ class Parsing(pl.LightningModule):
         test_path,
         model_path,
         word_path,
-        char_path=None,
         word_embedding="sskip",
+        char_path=None,
         char_embedding="random",
         punctuation=[".", "``", "''", ":", ","],
         optim="Adam",
@@ -184,7 +184,7 @@ class Parsing(pl.LightningModule):
             prior_order = hyps["prior_order"]
             grandPar = hyps["grandPar"]
             sibling = hyps["sibling"]
-            network = L2RPtrNet(
+            self.network = L2RPtrNet(
                 word_dim,
                 num_words,
                 char_dim,
@@ -221,7 +221,7 @@ class Parsing(pl.LightningModule):
         )
         logger.info(
             "# of Parameters: %d"
-            % (sum([param.numel() for param in network.parameters()]))
+            % (sum([param.numel() for param in self.network.parameters()]))
         )
 
     def forward(self):
@@ -241,7 +241,7 @@ class Parsing(pl.LightningModule):
         nbatch = words.size(0)
         nwords = masks_enc.sum() - nbatch
 
-        loss_arc, loss_type = self.loss(
+        loss_arc, loss_type = self.network.loss(
             words,
             chars,
             postags,

@@ -1,4 +1,6 @@
+import torch
 from torch import nn
+import torch.nn.functional as F
 from collections import OrderedDict
 from torch.nn.parameter import Parameter
 import math
@@ -118,8 +120,7 @@ class BiLinear(nn.Module):
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.weight_left)
         nn.init.xavier_uniform_(self.weight_right)
-        if self.bias:
-            nn.init.constant_(self.bias, 0.0)
+        nn.init.constant_(self.bias, 0.0)
         nn.init.xavier_uniform_(self.U)
 
     def forward(self, input_left, input_right):
