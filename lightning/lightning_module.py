@@ -10,6 +10,7 @@ from lightning.models.models import L2RPtrNet
 from lightning import utils
 from lightning.io.logger import get_logger
 from lightning.io import conllx_data
+from lightning.tasks import parser
 
 
 class Parsing(pl.LightningModule):
@@ -36,6 +37,7 @@ class Parsing(pl.LightningModule):
         loss_type="token",
         unk_replace=0.5,
         freeze=None,
+        beam=1,
     ):
         super().__init__()
         pl.seed_everything(seed)
@@ -60,6 +62,8 @@ class Parsing(pl.LightningModule):
         self.char_embedding = char_embedding
         self.char_path = char_path
 
+        self.beam = beam
+
         word_dict, word_dim = utils.load_embedding_dict(
             self.word_embedding, self.word_path
         )
@@ -74,10 +78,10 @@ class Parsing(pl.LightningModule):
         logger.info("Creating alphabets")
         alphabet_path = os.path.join(model_path, "alphabets")
         (
-            word_alphabet,
-            char_alphabet,
-            pos_alphabet,
-            type_alphabet,
+            self.word_alphabet,
+            self.char_alphabet,
+            self.pos_alphabet,
+            self.type_alphabet,
         ) = conllx_data.create_alphabets(
             alphabet_path,
             train_path,
@@ -86,10 +90,10 @@ class Parsing(pl.LightningModule):
             max_vocabulary_size=200000,
         )
 
-        num_words = word_alphabet.size()
-        num_chars = char_alphabet.size()
-        num_pos = pos_alphabet.size()
-        num_types = type_alphabet.size()
+        num_words = self.word_alphabet.size()
+        num_chars = self.char_alphabet.size()
+        num_pos = self.pos_alphabet.size()
+        num_types = self.type_alphabet.size()
 
         logger.info("Word Alphabet Size: %d" % num_words)
         logger.info("Character Alphabet Size: %d" % num_chars)
@@ -107,14 +111,14 @@ class Parsing(pl.LightningModule):
 
         def construct_word_embedding_table():
             scale = np.sqrt(3.0 / word_dim)
-            table = np.empty([word_alphabet.size(), word_dim], dtype=np.float32)
+            table = np.empty([self.word_alphabet.size(), word_dim], dtype=np.float32)
             table[conllx_data.UNK_ID, :] = (
                 np.zeros([1, word_dim]).astype(np.float32)
                 if freeze
                 else np.random.uniform(-scale, scale, [1, word_dim]).astype(np.float32)
             )
             oov = 0
-            for word, index in word_alphabet.items():
+            for word, index in self.word_alphabet.items():
                 if word in word_dict:
                     embedding = word_dict[word]
                 elif word.lower() in word_dict:
@@ -142,7 +146,7 @@ class Parsing(pl.LightningModule):
                 -scale, scale, [1, char_dim]
             ).astype(np.float32)
             oov = 0
-            for (char, index) in char_alphabet.items():
+            for (char, index) in self.char_alphabet.items():
                 if char in char_dict:
                     embedding = char_dict[char]
                 else:
@@ -264,8 +268,39 @@ class Parsing(pl.LightningModule):
 
         return loss
 
-    def validation_step(self):
-        raise NotImplementedError()
+    def validation_step(self, batch, batch_idx):
+        words = batch["WORD"]
+        chars = batch["CHAR"]
+        postags = batch["POS"]
+        heads = batch["HEAD"].numpy()
+        types = batch["TYPE"].numpy()
+        lengths = batch["LENGTH"].numpy()
+        masks = batch["MASK_ENC"]
+        heads_pred, types_pred = self.network.decode(
+            words,
+            chars,
+            postags,
+            mask=masks,
+            beam=self.beam,
+            leading_symbolic=conllx_data.NUM_SYMBOLIC_TAGS,
+        )
+
+        words = words.cpu().numpy()
+        postags = postags.cpu().numpy()
+
+        stats, stats_nopunc, stats_root, num_inst = parser.eval(
+            words,
+            postags,
+            heads_pred,
+            types_pred,
+            heads,
+            types,
+            self.word_alphabet,
+            self.pos_alphabet,
+            lengths,
+            punct_set=self.punctuation,
+            symbolic_root=True,
+        )
 
     def test_step(self):
         raise NotImplementedError()

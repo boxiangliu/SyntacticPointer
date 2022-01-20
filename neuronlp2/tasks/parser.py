@@ -1,7 +1,8 @@
-__author__ = 'max'
+__author__ = "max"
 
 import re
 import numpy as np
+
 
 def is_uni_punctuation(word):
     match = re.match("^[^\w\s]+$]", word, flags=re.UNICODE)
@@ -15,30 +16,42 @@ def is_punctuation(word, pos, punct_set=None):
         return pos in punct_set
 
 
-def eval(words, postags, heads_pred, types_pred, heads, types, word_alphabet, pos_alphabet, lengths,
-         punct_set=None, symbolic_root=False, symbolic_end=False):
+def eval(
+    words,
+    postags,
+    heads_pred,
+    types_pred,
+    heads,
+    types,
+    word_alphabet,
+    pos_alphabet,
+    lengths,
+    punct_set=None,
+    symbolic_root=False,
+    symbolic_end=False,
+):
     batch_size, _ = words.shape
-    ucorr = 0.
-    lcorr = 0.
-    total = 0.
-    ucomplete_match = 0.
-    lcomplete_match = 0.
+    ucorr = 0.0
+    lcorr = 0.0
+    total = 0.0
+    ucomplete_match = 0.0
+    lcomplete_match = 0.0
 
-    ucorr_nopunc = 0.
-    lcorr_nopunc = 0.
-    total_nopunc = 0.
-    ucomplete_match_nopunc = 0.
-    lcomplete_match_nopunc = 0.
+    ucorr_nopunc = 0.0
+    lcorr_nopunc = 0.0
+    total_nopunc = 0.0
+    ucomplete_match_nopunc = 0.0
+    lcomplete_match_nopunc = 0.0
 
-    corr_root = 0.
-    total_root = 0.
+    corr_root = 0.0
+    total_root = 0.0
     start = 1 if symbolic_root else 0
     end = 1 if symbolic_end else 0
     for i in range(batch_size):
-        ucm = 1.
-        lcm = 1.
-        ucm_nopunc = 1.
-        lcm_nopunc = 1.
+        ucm = 1.0
+        lcm = 1.0
+        ucm_nopunc = 1.0
+        lcm_nopunc = 1.0
         for j in range(start, lengths[i] - end):
             word = word_alphabet.get_instance(words[i, j])
             pos = pos_alphabet.get_instance(postags[i, j])
@@ -75,9 +88,18 @@ def eval(words, postags, heads_pred, types_pred, heads, types, word_alphabet, po
         ucomplete_match_nopunc += ucm_nopunc
         lcomplete_match_nopunc += lcm_nopunc
 
-    return (ucorr, lcorr, total, ucomplete_match, lcomplete_match), \
-           (ucorr_nopunc, lcorr_nopunc, total_nopunc, ucomplete_match_nopunc, lcomplete_match_nopunc), \
-           (corr_root, total_root), batch_size
+    return (
+        (ucorr, lcorr, total, ucomplete_match, lcomplete_match),
+        (
+            ucorr_nopunc,
+            lcorr_nopunc,
+            total_nopunc,
+            ucomplete_match_nopunc,
+            lcomplete_match_nopunc,
+        ),
+        (corr_root, total_root),
+        batch_size,
+    )
 
 
 def decode_MST(energies, lengths, leading_symbolic=0, labeled=True):
@@ -232,9 +254,9 @@ def decode_MST(energies, lengths, leading_symbolic=0, labeled=True):
             l = par[l]
 
     if labeled:
-        assert energies.ndim == 4, 'dimension of energies is not equal to 4'
+        assert energies.ndim == 4, "dimension of energies is not equal to 4"
     else:
-        assert energies.ndim == 3, 'dimension of energies is not equal to 3'
+        assert energies.ndim == 3, "dimension of energies is not equal to 3"
     input_shape = energies.shape
     batch_size = input_shape[0]
     max_length = input_shape[2]

@@ -815,6 +815,7 @@ class L2RPtrNet(nn.Module):
         hypothesis_scores = output_enc.new_zeros((batch, 1))
 
         # [batch, beam, length]
+        # Each word points to itself
         children = (
             torch.arange(max_len, device=device, dtype=torch.int64)
             .view(1, 1, max_len)

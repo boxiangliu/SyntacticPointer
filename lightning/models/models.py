@@ -1,5 +1,6 @@
 from torch import nn
 import torch
+import torch.nn.functional as F
 from lightning.nn.modules import CharCNN, BiAffine, BiLinear
 from enum import Enum
 from neuronlp2.nn import VarFastLSTM
@@ -305,5 +306,256 @@ class L2RPtrNet(nn.Module):
         # loss_arc [batch, length_decoder]; loss_type [batch, length_decoder]
         return loss_arc.sum(dim=1), loss_type.sum(dim=1)
 
-    def decode(self):
-        raise NotImplementedError
+    def decode(
+        self, input_word, input_char, input_pos, mask=None, beam=1, leading_symbolic=0
+    ):
+        def creates_cycle(index, arcs):
+            head = arcs[index]
+            if head == 0:
+                return False
+            iter = len(arcs) + 1
+            elto = arcs[head]
+            while iter > 0:
+                if elto == 0:
+                    return False
+                if elto == index:
+                    return True
+                elto = arcs[elto]
+                iter -= 1
+            return False
+
+        # reset noise for decoder
+        self.decoder.reset_noise(0)
+
+        # output_enc [batch, length, model_dim]
+        # arc_c [batch, length, arc_space]
+        # type_c [batch, length, type_space]
+        # hn [num_direction, batch, hidden_size]
+        output_enc, hn = self._get_encoder_output(
+            input_word, input_char, input_pos, mask=mask
+        )
+        enc_dim = output_enc.size(2)
+        device = output_enc.device
+        # output size [batch, length_encoder, arc_space]
+        arc_c = self.activation(self.arc_c(output_enc))
+        # output size [batch, length_encoder, type_space]
+        type_c = self.activation(self.type_c(output_enc))
+        type_space = type_c.size(2)
+        # [decoder_layers, batch, hidden_size]
+        hn = self._transform_decoder_init_state(hn)
+        batch, max_len, _ = output_enc.size()
+
+        heads = torch.zeros(batch, 1, max_len, device=device, dtype=torch.int64)
+        types = torch.zeros(batch, 1, max_len, device=device, dtype=torch.int64)
+
+        # num_steps = 2 * max_len - 1
+        num_steps = max_len - 1
+        # stacked_heads = torch.zeros(batch, 1, num_steps + 1, device=device, dtype=torch.int64)
+        stacked_heads = torch.ones(
+            batch, 1, num_steps + 1, device=device, dtype=torch.int64
+        )
+        # siblings = torch.zeros(batch, 1, num_steps + 1, device=device, dtype=torch.int64) if self.sibling else None
+        hypothesis_scores = output_enc.new_zeros((batch, 1))
+
+        # [batch, beam, length]
+        # Each word points to itself
+        children = (
+            torch.arange(max_len, device=device, dtype=torch.int64)
+            .view(1, 1, max_len)
+            .expand(batch, beam, max_len)
+        )
+        # constraints = torch.zeros(batch, 1, max_len, device=device, dtype=torch.bool)
+        constraints = torch.zeros(batch, 1, max_len, device=device, dtype=torch.uint8)
+
+        # constraints[:, :, 0] = True
+
+        # [batch, 1]
+        batch_index = torch.arange(batch, device=device, dtype=torch.int64).view(
+            batch, 1
+        )
+
+        # compute lengths
+        if mask is None:
+            steps = torch.new_tensor(
+                [num_steps] * batch, dtype=torch.int64, device=device
+            )
+            mask_sent = torch.ones(batch, 1, max_len, dtype=torch.bool, device=device)
+        else:
+            # steps = (mask.sum(dim=1) * 2 - 1).long()
+            steps = (mask.sum(dim=1) - 1).long()
+            # mask_sent = mask.unsqueeze(1).bool()
+            mask_sent = mask.unsqueeze(1).byte()
+
+        num_hyp = 1
+        mask_hyp = torch.ones(batch, 1, device=device)
+        hx = hn
+        for t in range(num_steps):
+
+            # [batch, num_hyp]
+            curr_heads = stacked_heads[:, :, t]
+
+            curr_gpars = heads.gather(dim=2, index=curr_heads.unsqueeze(2)).squeeze(2)
+            # curr_sibs = siblings[:, :, t] if self.sibling else None
+
+            # [batch, num_hyp, enc_dim]
+            src_encoding = output_enc.gather(
+                dim=1, index=curr_heads.unsqueeze(2).expand(batch, num_hyp, enc_dim)
+            )
+
+            """
+            if self.sibling:
+                mask_sib = curr_sibs.gt(0).float().unsqueeze(2)
+                output_enc_sibling = output_enc.gather(dim=1, index=curr_sibs.unsqueeze(2).expand(batch, num_hyp, enc_dim)) * mask_sib
+                src_encoding = src_encoding + output_enc_sibling
+
+            if self.grandPar:
+                output_enc_gpar = output_enc.gather(dim=1, index=curr_gpars.unsqueeze(2).expand(batch, num_hyp, enc_dim))
+                src_encoding = src_encoding + output_enc_gpar
+            """
+
+            # transform to decoder input
+            # [batch, num_hyp, dec_dim]
+            src_encoding = self.activation(self.src_dense(src_encoding))
+
+            # output [batch * num_hyp, dec_dim]
+            # hx [decoder_layer, batch * num_hyp, dec_dim]
+            output_dec, hx = self.decoder.step(
+                src_encoding.view(batch * num_hyp, -1), hx=hx
+            )
+            dec_dim = output_dec.size(1)
+            # [batch, num_hyp, dec_dim]
+            output_dec = output_dec.view(batch, num_hyp, dec_dim)
+
+            # [batch, num_hyp, arc_space]
+            arc_h = self.activation(self.arc_h(output_dec))
+            # [batch, num_hyp, type_space]
+            type_h = self.activation(self.type_h(output_dec))
+            # [batch, num_hyp, length]
+            out_arc = self.biaffine(arc_h, arc_c, mask_query=mask_hyp, mask_key=mask)
+            # mask invalid position to -inf for log_softmax
+            if mask is not None:
+                minus_mask_enc = mask.eq(0).unsqueeze(1)
+                out_arc.masked_fill_(minus_mask_enc, float("-inf"))
+
+            # [batch]
+            # mask_last = steps.le(t + 1)
+            mask_stop = steps.le(t)
+
+            minus_mask_hyp = mask_hyp.eq(0).unsqueeze(2)
+            # [batch, num_hyp, length]
+            hyp_scores = F.log_softmax(out_arc, dim=2).masked_fill_(
+                mask_stop.view(batch, 1, 1) + minus_mask_hyp, 0
+            )
+            # [batch, num_hyp, length]
+            hypothesis_scores = hypothesis_scores.unsqueeze(2) + hyp_scores
+
+            # [batch, num_hyp, length]
+            mask_leaf = curr_heads.unsqueeze(2).eq(children[:, :num_hyp]) * mask_sent
+            mask_non_leaf = (~mask_leaf) * mask_sent
+
+            # [batch, num_hyp, length]
+            # mask_leaf = mask_leaf * (mask_last.unsqueeze(1) + curr_heads.ne(0)).unsqueeze(2)
+            # mask_non_leaf = mask_non_leaf * (~constraints)
+
+            # hypothesis_scores.masked_fill_(~(mask_non_leaf + mask_leaf), float('-inf'))
+            hypothesis_scores.masked_fill_(~(mask_non_leaf), float("-inf"))
+            # [batch, num_hyp * length]
+            hypothesis_scores, hyp_index = torch.sort(
+                hypothesis_scores.view(batch, -1), dim=1, descending=True
+            )
+
+            # [batch]
+            prev_num_hyp = num_hyp
+            # num_hyps = (mask_leaf + mask_non_leaf).long().view(batch, -1).sum(dim=1)
+            num_hyps = (mask_non_leaf).long().view(batch, -1).sum(dim=1)
+            num_hyp = num_hyps.max().clamp(max=beam).item()
+            # [batch, hum_hyp]
+            hyps = torch.arange(num_hyp, device=device, dtype=torch.int64).view(
+                1, num_hyp
+            )
+            mask_hyp = hyps.lt(num_hyps.unsqueeze(1)).float()
+
+            # [batch, num_hyp]
+            hypothesis_scores = hypothesis_scores[:, :num_hyp]
+            hyp_index = hyp_index[:, :num_hyp]
+            base_index = hyp_index / max_len
+            child_index = hyp_index % max_len
+
+            # [batch, num_hyp]
+            hyp_heads = curr_heads.gather(dim=1, index=base_index)
+            hyp_gpars = curr_gpars.gather(dim=1, index=base_index)
+
+            # [batch, num_hyp, length]
+            base_index_expand = base_index.unsqueeze(2).expand(batch, num_hyp, max_len)
+
+            # [batch, num_hyp, length]
+
+            heads = heads.gather(dim=1, index=base_index_expand)
+
+            heads.scatter_(
+                2, hyp_heads.unsqueeze(2), child_index.unsqueeze(2)
+            )  # es equivalente a heads[head]=child_index
+
+            types = types.gather(dim=1, index=base_index_expand)
+            # [batch, num_hyp]
+            org_types = types.gather(dim=2, index=child_index.unsqueeze(2)).squeeze(2)
+
+            # [batch, num_hyp, num_steps]
+            base_index_expand = base_index.unsqueeze(2).expand(
+                batch, num_hyp, num_steps + 1
+            )
+
+            stacked_heads = stacked_heads.gather(dim=1, index=base_index_expand)
+
+            # stacked_heads[:, :, t + 1] = torch.where(mask_leaf, hyp_gpars, child_index)
+            stacked_heads[:, :, t + 1] = stacked_heads[:, :, t] + 1
+
+            """
+            if self.sibling:
+                siblings = siblings.gather(dim=1, index=base_index_expand)
+                siblings[:, :, t + 1] = torch.where(mask_leaf, child_index, torch.zeros_like(child_index))
+            """
+
+            # [batch, num_hyp, type_space]
+            base_index_expand = base_index.unsqueeze(2).expand(
+                batch, num_hyp, type_space
+            )
+            child_index_expand = child_index.unsqueeze(2).expand(
+                batch, num_hyp, type_space
+            )
+            # [batch, num_hyp, num_labels]
+            out_type = self.bilinear(
+                type_h.gather(dim=1, index=base_index_expand),
+                type_c.gather(dim=1, index=child_index_expand),
+            )
+            hyp_type_scores = F.log_softmax(out_type, dim=2)
+            # compute the prediction of types [batch, num_hyp]
+            hyp_type_scores, hyp_types = hyp_type_scores.max(dim=2)
+            hypothesis_scores = hypothesis_scores + hyp_type_scores.masked_fill_(
+                mask_stop.view(batch, 1), 0
+            )
+            # types.scatter_(2, child_index.unsqueeze(2), torch.where(mask_leaf, org_types, hyp_types).unsqueeze(2))
+            types.scatter_(2, hyp_heads.unsqueeze(2), hyp_types.unsqueeze(2))
+
+            # hx [decoder_layer, batch * num_hyp, dec_dim]
+            # hack to handle LSTM
+            hx_index = (base_index + batch_index * prev_num_hyp).view(batch * num_hyp)
+            if isinstance(hx, tuple):
+                hx, cx = hx
+                hx = hx[:, hx_index]
+                cx = cx[:, hx_index]
+                hx = (hx, cx)
+            else:
+                hx = hx[:, hx_index]
+
+        heads = heads[:, 0].cpu().numpy()
+        types = types[:, 0].cpu().numpy()
+
+        # REMOVE CYCLES
+        if self.remove_cycles:
+            for head in heads:
+                for elto in reversed(range(len(head))):
+                    if creates_cycle(elto, head):
+                        head[elto] = 0
+
+        return heads, types
