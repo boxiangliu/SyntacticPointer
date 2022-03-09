@@ -612,7 +612,6 @@ class L2RPtrNet(nn.Module):
         enc_dim = output_enc.size(2)
         batch, length_dec = heads_stack.size()
         # rearrange the order of tokens
-        breakpoint()
         src_encoding = output_enc.gather(
             dim=1, index=heads_stack.unsqueeze(2).expand(batch, length_dec, enc_dim)
         )
@@ -848,7 +847,6 @@ class L2RPtrNet(nn.Module):
         mask_hyp = torch.ones(batch, 1, device=device)
         hx = hn
         for t in range(num_steps):
-
             # [batch, num_hyp]
             curr_heads = stacked_heads[:, :, t]
 
@@ -936,7 +934,7 @@ class L2RPtrNet(nn.Module):
             # [batch, num_hyp]
             hypothesis_scores = hypothesis_scores[:, :num_hyp]
             hyp_index = hyp_index[:, :num_hyp]
-            base_index = hyp_index / max_len
+            base_index = hyp_index // max_len
             child_index = hyp_index % max_len
 
             # [batch, num_hyp]
