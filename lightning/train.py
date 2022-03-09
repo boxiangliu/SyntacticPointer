@@ -1,6 +1,7 @@
 from lightning.lightning_module import Parsing
 from lightning.data import PTBData
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import WandbLogger
 
 train_path = "experiments/data/ptb-train.conllx"
 dev_path = "experiments/data/ptb-dev.conllx"
@@ -20,7 +21,8 @@ model = Parsing(
     config, train_path, dev_path, test_path, model_path, word_path, word_embedding
 )
 
-trainer = pl.Trainer(max_epochs=1, accelerator="cpu", num_sanity_val_steps=0)
+wandb_logger = WandbLogger()
+trainer = pl.Trainer(
+    max_epochs=10, accelerator="gpu", strategy="dp", logger=wandb_logger, gpus=[0]
+)
 trainer.fit(model, ptb_data)
-
-exit(0)

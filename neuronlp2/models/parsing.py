@@ -612,6 +612,7 @@ class L2RPtrNet(nn.Module):
         enc_dim = output_enc.size(2)
         batch, length_dec = heads_stack.size()
         # rearrange the order of tokens
+        breakpoint()
         src_encoding = output_enc.gather(
             dim=1, index=heads_stack.unsqueeze(2).expand(batch, length_dec, enc_dim)
         )

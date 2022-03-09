@@ -1,4 +1,4 @@
-    __author__ = 'max'
+__author__ = "max"
 
 from collections import defaultdict
 from torch.optim.optimizer import Optimizer
@@ -7,19 +7,24 @@ from torch.optim.optimizer import Optimizer
 class _LRScheduler(object):
     def __init__(self, optimizer, last_epoch=-1):
         if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
+            raise TypeError("{} is not an Optimizer".format(type(optimizer).__name__))
         self.optimizer = optimizer
         if last_epoch == -1:
-            for group in optimizer.param_groups: # param_groups is a list of dictionaries
-                group.setdefault('initial_lr', group['lr'])
+            for (
+                group
+            ) in optimizer.param_groups:  # param_groups is a list of dictionaries
+                group.setdefault("initial_lr", group["lr"])
             last_epoch = 0
         else:
             for i, group in enumerate(optimizer.param_groups):
-                if 'initial_lr' not in group:
-                    raise KeyError("param 'initial_lr' is not specified "
-                                   "in param_groups[{}] when resuming an optimizer".format(i))
-        self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
+                if "initial_lr" not in group:
+                    raise KeyError(
+                        "param 'initial_lr' is not specified "
+                        "in param_groups[{}] when resuming an optimizer".format(i)
+                    )
+        self.base_lrs = list(
+            map(lambda group: group["initial_lr"], optimizer.param_groups)
+        )
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -27,7 +32,9 @@ class _LRScheduler(object):
         It contains an entry for every variable in self.__dict__ which
         is not the optimizer.
         """
-        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
+        return {
+            key: value for key, value in self.__dict__.items() if key != "optimizer"
+        }
 
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
@@ -46,7 +53,7 @@ class _LRScheduler(object):
             epoch = self.last_epoch + 1
         self.last_epoch = epoch
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
-            param_group['lr'] = lr
+            param_group["lr"] = lr
 
     def reset_state(self):
         self.optimizer.state.clear()
@@ -66,12 +73,15 @@ class InverseSquareRootScheduler(_LRScheduler):
       decay_factor = args.lr * sqrt(args.warmup_updates)
       lr = decay_factor / sqrt(update_num)
     """
+
     def __init__(self, optimizer, warmup_steps, init_lr, last_epoch=-1):
-        assert warmup_steps > 0, 'warmup steps should be larger than 0.'
+        assert warmup_steps > 0, "warmup steps should be larger than 0."
         super(InverseSquareRootScheduler, self).__init__(optimizer, last_epoch)
         self.warmup_steps = float(warmup_steps)
         self.init_lr = init_lr
-        self.lr_steps = [(base_lr - init_lr) / warmup_steps for base_lr in self.base_lrs]
+        self.lr_steps = [
+            (base_lr - init_lr) / warmup_steps for base_lr in self.base_lrs
+        ]
         self.decay_factor = self.warmup_steps ** 0.5
         if last_epoch == -1:
             last_epoch = 0
@@ -79,9 +89,11 @@ class InverseSquareRootScheduler(_LRScheduler):
 
     def get_lr(self):
         if self.last_epoch < self.warmup_steps:
-            return [self.init_lr + lr_step * self.last_epoch for lr_step in self.lr_steps]
+            return [
+                self.init_lr + lr_step * self.last_epoch for lr_step in self.lr_steps
+            ]
         else:
-            lr_factor = self.decay_factor * self.last_epoch**-0.5
+            lr_factor = self.decay_factor * self.last_epoch ** -0.5
             return [base_lr * lr_factor for base_lr in self.base_lrs]
 
 
@@ -103,14 +115,18 @@ class ExponentialScheduler(_LRScheduler):
         # handle warmup <= 0
         self.warmup_steps = max(1, warmup_steps)
         self.init_lr = init_lr
-        self.lr_steps = [(base_lr - init_lr) / self.warmup_steps for base_lr in self.base_lrs]
+        self.lr_steps = [
+            (base_lr - init_lr) / self.warmup_steps for base_lr in self.base_lrs
+        ]
         if last_epoch == -1:
             last_epoch = 0
         self.step(last_epoch)
 
     def get_lr(self):
         if self.last_epoch < self.warmup_steps:
-            return [self.init_lr + lr_step * self.last_epoch for lr_step in self.lr_steps]
+            return [
+                self.init_lr + lr_step * self.last_epoch for lr_step in self.lr_steps
+            ]
         else:
             lr_factor = self.gamma ** (self.last_epoch - self.warmup_steps)
             return [base_lr * lr_factor for base_lr in self.base_lrs]

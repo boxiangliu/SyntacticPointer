@@ -228,6 +228,8 @@ class Parsing(pl.LightningModule):
             % (sum([param.numel() for param in self.network.parameters()]))
         )
 
+        self.save_hyperparameters()
+
     def forward(self):
         raise NotImplementedError()
 
@@ -263,8 +265,15 @@ class Parsing(pl.LightningModule):
 
         if self.loss_ty_token:
             loss = loss_total.div(nwords)
+            self.log("train/loss_arc", loss_arc.div(nwords))
+            self.log("train/loss_type", loss_type.div(nwords))
+            self.log("train/loss", loss)
+
         else:
             loss = loss_total.div(nbatch)
+            self.log("train/loss_arc", loss_arc.div(nbatch))
+            self.log("train/loss_type", loss_type.div(nbatch))
+            self.log("train/loss", loss)
 
         return loss
 
@@ -272,9 +281,9 @@ class Parsing(pl.LightningModule):
         words = batch["WORD"]
         chars = batch["CHAR"]
         postags = batch["POS"]
-        heads = batch["HEAD"].numpy()
-        types = batch["TYPE"].numpy()
-        lengths = batch["LENGTH"].numpy()
+        heads = batch["HEAD"]
+        types = batch["TYPE"]
+        lengths = batch["LENGTH"]
         masks = batch["MASK_ENC"]
         heads_pred, types_pred = self.network.decode(
             words,
@@ -301,6 +310,30 @@ class Parsing(pl.LightningModule):
             punct_set=self.punctuation,
             symbolic_root=True,
         )
+
+        ucorr, lcorr, total, ucm, lcm = stats
+        ucorr_nopunc, lcorr_nopunc, total_nopunc, ucm_nopunc, lcm_nopunc = stats_nopunc
+        corr_root, total_root = stats_root
+
+        self.log(
+            "dev/W. Punct",
+            {"ucorr": ucorr, "lcorr": lcorr, "total": total, "ucm": ucm, "lcm": lcm},
+        )
+
+        self.log(
+            "dev/Wo Punct",
+            {
+                "ucorr": ucorr_nopunc,
+                "lcorr": lcorr_nopunc,
+                "total": total_nopunc,
+                "ucm": ucm_nopunc,
+                "lcm": lcm_nopunc,
+            },
+        )
+
+        self.log(
+            "dev/Root", {"corr": corr_root, "total": total_root}
+        )  # TODO: acc need to be added as a custom metric
 
     def test_step(self):
         raise NotImplementedError()

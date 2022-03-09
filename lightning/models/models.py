@@ -303,7 +303,7 @@ class L2RPtrNet(nn.Module):
             loss_arc = loss_arc * mask_d
             loss_type = loss_type * mask_d
 
-        # loss_arc [batch, length_decoder]; loss_type [batch, length_decoder]
+        # loss_arc [batch]; loss_type [batch]
         return loss_arc.sum(dim=1), loss_type.sum(dim=1)
 
     def decode(
@@ -351,10 +351,12 @@ class L2RPtrNet(nn.Module):
         # num_steps = 2 * max_len - 1
         num_steps = max_len - 1
         # stacked_heads = torch.zeros(batch, 1, num_steps + 1, device=device, dtype=torch.int64)
+        # [batch, 1, length]
         stacked_heads = torch.ones(
             batch, 1, num_steps + 1, device=device, dtype=torch.int64
         )
         # siblings = torch.zeros(batch, 1, num_steps + 1, device=device, dtype=torch.int64) if self.sibling else None
+        # [batch, 1]
         hypothesis_scores = output_enc.new_zeros((batch, 1))
 
         # [batch, beam, length]
@@ -458,7 +460,8 @@ class L2RPtrNet(nn.Module):
             # mask_non_leaf = mask_non_leaf * (~constraints)
 
             # hypothesis_scores.masked_fill_(~(mask_non_leaf + mask_leaf), float('-inf'))
-            hypothesis_scores.masked_fill_(~(mask_non_leaf), float("-inf"))
+            # hypothesis_scores.masked_fill_(~(mask_non_leaf), float("-inf")) # Boxiang Liu, replaced with next line
+            hypothesis_scores.masked_fill_(mask_non_leaf.eq(0), float("-inf"))
             # [batch, num_hyp * length]
             hypothesis_scores, hyp_index = torch.sort(
                 hypothesis_scores.view(batch, -1), dim=1, descending=True
@@ -478,7 +481,8 @@ class L2RPtrNet(nn.Module):
             # [batch, num_hyp]
             hypothesis_scores = hypothesis_scores[:, :num_hyp]
             hyp_index = hyp_index[:, :num_hyp]
-            base_index = hyp_index / max_len
+            # base_index = hyp_index / max_len # Boxiang Liu, replaced with next line
+            base_index = hyp_index // max_len
             child_index = hyp_index % max_len
 
             # [batch, num_hyp]
